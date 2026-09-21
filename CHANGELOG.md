@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.26-ai-provider-concurrency-reservation (Production Deployed, 2026-09-21) - AI Provider 持久并发预留
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v30，新增组织级仅追加并发策略、持久预留和仅追加生命周期事件；默认上限为 10，`0` 停止新 AI 工作，最大值为 64。
+- 每次逻辑 AI 操作只占一个槽位，连续 Tavily 与 DeepSeek 调用复用同一预留；预留跨进程重启保留，并由 120 秒工作期限、15 秒回收宽限和随机 fencing 所有权保护。
+- 品牌增强、策略、需求/方案/PPT 大纲、AI 对话及效果复盘等真实 Provider 路径均在 RAG、联网、Provider 调用和业务结果写入前取得许可；满载时返回 `429 AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED`，不会产生业务、Token 或联网缓存写入。
+- 新增成员查询、平台管理员版本化更新 API 及管理控制室紧凑配置；管理员不绕过并发上限。月度 Token 配额继续独立执行，本版不包含队列、优先级、强制释放、计费、定价或 Token 预扣。
+- 已完成幂等重放不占槽位；最新 CRM、M3/M4、知识库、方案、报告和 PPT 界面保持不变。
+
+### 轻量定向验证与独立审查 / Focused Verification And Independent Review
+- 按“一功能一上线”执行受影响矩阵 `103/103`、迁移精确性 `23/23`、迁移重放 `8/8`、可信清单 `3/3`、发布清单 `5/5`；脱敏迁移门禁 188 通过、10 个平台限定跳过、0 失败，候选 Chromium 冒烟 `3/3`。
+- 本版触及 schema、中央 Provider 准入及共享发布控制，因此保留迁移、重放、完整性、失败关闭和生产可逆验收；未运行无关 CRM、网红、飞书或完整业务套件。
+- 候选阶段发现可信入口排序、旧 schema 断言、候选测试依赖及生产验收运行环境四类发布问题；均在接纳前最小修复。独立终审结论为 `APPROVE`，无剩余 P0-P2。
+
+### 生产状态 / Production Status
+- 接纳生产提交 `43bb85b846b50c010f5c14a388950319e0ce59d6` 已在切换前同步 GitHub。正式运行 `fe52e805ed4b445db80da1a5b2a87c49` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 和 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 可验证发布备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260921-085332`；备份清单 SHA-256 为 `c13b9c0657a839c554fdce2f35995c9f79124ef5670bee7ee16949bce4002751`，数据库 SHA-256 为 `51c879028fc96eeb2d3e6149f1a0e73d780827a3423ce74eedd1cfb2c060dd06`。
+- 公网健康 `200`、解析器 ready、schema v30、SQLite `quick_check=ok`、外键异常 0、PM2 online 且重启 0、Nginx active。生产验收临时将并发上限设为 1，第二个请求在 Provider 前返回类型化 429，业务与 Token 写入均为 0；受控生命周期精确记录 `acquired -> dispatch_authorized -> provider_completed -> released`，随后恢复原上限 10，活动预留为 0。
+- root-only 并发验收证据为 `/root/turingmarket/deployment-evidence/ai-concurrency-acceptance-fe52e805ed4b445db80da1a5b2a87c49.json`，SHA-256 为 `e1bfb38ddc7e7418daf585c13cbee2c5c366c976700ba9f834fef1b64060fed8`；文件权限为 `0600`，证据不包含预留 ID 或 fencing 值。
+- 发布后管理员登录冒烟发现此前指定的 `derrick` 凭据哈希未保留；在独立受保护备份 `/root/turingmarket/backups/credential-rotation-20260921-010735` 后完成受审计恢复并撤销旧会话。登录、`/api/auth/me`、退出均通过，最终会话数为 0；本记录不保存凭据明文。
+
+### 后续节奏 / Delivery Cadence
+- 继续每完成一个独立功能即做受影响测试、必要风险门禁、一次独立审查、可验证备份和当轮线上验收；完整重型套件仅在阶段收口或风险边界触发。下一独立版本为账单能力，其后执行第 8 阶段收口。
+
 ## v0.9.25-organization-monthly-ai-quota (Production Deployed, 2026-09-21) - 组织月度共享 AI 配额
 
 ### 交付与范围 / Delivery And Scope
