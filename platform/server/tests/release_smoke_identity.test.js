@@ -46,6 +46,12 @@ function fixture() {
     INSERT INTO organizations VALUES (10,'alpha','Alpha');
     INSERT INTO organization_memberships (org_id,user_id,role_code,status) VALUES (10,1,'org_admin','active');
     INSERT INTO organization_member_policy (org_id,user_id,access_mode) VALUES (10,1,'read_write');
+    CREATE TRIGGER organization_membership_policy_insert
+    AFTER INSERT ON organization_memberships
+    BEGIN
+      INSERT INTO organization_member_policy (org_id,user_id,access_mode)
+      VALUES (NEW.org_id,NEW.user_id,'read_write');
+    END;
   `);
   return db;
 }
@@ -135,6 +141,28 @@ test('fails closed on a conflicting release smoke identity without repairing or 
       db.prepare("SELECT password_hash FROM users WHERE username='release-smoke'").get().password_hash,
       'conflicting-hash'
     );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('rolls back every release smoke row when the membership policy trigger is unavailable', () => {
+  const db = fixture();
+  try {
+    const { provisionReleaseSmokeIdentity } = loadProvisioner();
+    db.exec('DROP TRIGGER organization_membership_policy_insert;');
+    assert.throws(
+      () => provisionReleaseSmokeIdentity(db, {
+        organizationId: 10,
+        createPasswordHash: () => '$2b$12$must-be-rolled-back'
+      }),
+      /RELEASE_SMOKE_POLICY_PROVISION_FAILED/
+    );
+    assert.equal(db.prepare("SELECT password_hash FROM users WHERE username='derrick'").get().password_hash, 'protected-owner-hash');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM users WHERE username='release-smoke'").get().count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM organization_memberships WHERE user_id<>1').get().count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM organization_member_policy WHERE user_id<>1').get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 0);
   } finally {
     db.close();

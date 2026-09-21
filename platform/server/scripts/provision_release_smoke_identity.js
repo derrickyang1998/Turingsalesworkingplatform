@@ -121,10 +121,14 @@ function provisionReleaseSmokeIdentity(db, options = {}) {
       INSERT INTO organization_memberships (org_id,user_id,role_code,status)
       VALUES (?,?,?,?)
     `).run(organizationId, userId, 'org_admin', 'active');
-    db.prepare(`
-      INSERT INTO organization_member_policy (org_id,user_id,access_mode)
-      VALUES (?,?,?)
-    `).run(organizationId, userId, 'read_write');
+    const memberPolicy = db.prepare(`
+      SELECT access_mode
+      FROM organization_member_policy
+      WHERE org_id=? AND user_id=?
+    `).get(organizationId, userId);
+    if (!memberPolicy || memberPolicy.access_mode !== 'read_write') {
+      fail('RELEASE_SMOKE_POLICY_PROVISION_FAILED');
+    }
     db.prepare(`
       INSERT INTO activity_log (user_id,action,module,details,ip_address)
       VALUES (?,?,?,?,NULL)
