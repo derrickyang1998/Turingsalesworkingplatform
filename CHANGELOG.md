@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.28-admin-operations-and-decision-deck-hardening (Release Candidate, 2026-09-23) - 运营审计与 24 页决策型 PPT 稳定化
+## v0.9.28-admin-operations-and-decision-deck-hardening (Production Deployed, 2026-09-23) - 运营审计与 24 页决策型 PPT 稳定化
 
 ### 交付范围 / Delivery Scope
 - 方案规划、HTMLPPT 与 PPTX 统一为已确认的 24 页客户决策结构；模型输出不足、超页、乱序或槽位声明错误时由服务端修复为固定顺序，未匹配内容进入可见的结构校验项，不再静默截断。
@@ -11,7 +11,13 @@
 ### 定向验证 / Focused Verification
 - JavaScript/Python/PowerShell 语法、差异检查与冻结文件摘要通过；决策型方案/PPT `9/9`、产品壳层 `40/40`、真实浏览器 PPT bridge `2/2`、Campaign/RAG `18/18`、管理员运维 `28/28`、受信任部署门禁 `4/4`，共 `101/101` 通过。
 - 独立审查先提出 1 个 P1 与 5 个 P2；请求代次、槽位校验、`slot_key` 透传、未匹配内容保留、证据去空白和交互控件 Space 键保护修复后，最终结论为 `APPROVE`，开放 P0-P2 为 0。
-- 生产部署、在线业务验收、可验证备份及公网发布守卫结果将在候选通过后回填；本条不提前声称上线。
+- 正式发布前本地预检返回 `LOCAL_DEPLOY_PREFLIGHT_OK`；生产候选依赖、迁移演练、16 项功能测试及 Chromium 冒烟 `3/3` 全部通过，随后完成受保护切换。
+
+### 生产验收 / Production Acceptance
+- 接纳代码提交 `04fe107b90825b42081ad853c77e5ed4dd2da8ee` 已同步 GitHub 并部署；正式运行 `ddb3ee31a6734ff5b5cb7211f012785f` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 与 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260923-172308`，`SHA256SUMS` SHA-256 为 `4abc03fa3e51abb4c92485169342df4c73b80f5c900475adcc113267c3aa9c46`；接纳候选树 SHA-256 为 `2e0b1d4765e14c770472f4185d60a400b7640d985726e8497e239ee3e7f37f4d`。
+- 公网 `/api/health`、`/m3`、`/admin` 及相关脚本均为 `200`，解析器 ready；认证线上链路确认 AI 大纲、HTMLPPT 与 PPTX 均严格为 24 页并保留品牌/产品，HTMLPPT 桌面和移动端无内部溢出、翻页正常，管理员运营 API 为 `200`。
+- 发布烟测仅使用专用不可登录的 `release-smoke` 身份；测试会话和测试知识条目均清理为 0，SQLite `quick_check=ok`。两次生产门禁均为 `PROTECTED_CREDENTIALS_UNCHANGED 39`，未使用、修改或轮换 `derrick` 凭据。
 
 ## v0.9.27-decision-deck-preview-production (Production Deployed, 2026-09-23) - 客户决策型方案与 PPT 预览增量
 
