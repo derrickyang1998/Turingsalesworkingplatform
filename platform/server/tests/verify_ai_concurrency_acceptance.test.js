@@ -63,6 +63,8 @@ async function startActualServer() {
       PORT: String(port),
       DB_PATH: dbPath,
       UPLOAD_SANDBOX_SPOOL_ROOT: path.join(directory, 'upload-sandbox'),
+      TMP_DIR: path.join(directory, 'tmp'),
+      PPT_CACHE_DIR: path.join(directory, 'ppt-cache'),
       TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
       JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
