@@ -3066,9 +3066,6 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
         .digest('hex');
     }
     const template = body.template && typeof body.template === 'object' ? body.template : {};
-    const templateSections = Array.isArray(template.sections)
-      ? template.sections.slice(0, 20).map((section) => String(section).slice(0, 200))
-      : [];
     const verifiedDemandAudit = linkedRequest
       ? aiService.verifyDemandAnalysisAuditContext(db, {
           user: req.user,
@@ -3085,17 +3082,11 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
       demandAudit.push('需求分析对话 #' + verifiedDemandAudit.conversation_id);
       demandAudit.push('需求分析消息 #' + verifiedDemandAudit.message_id);
     }
-    const prompt = [
-      '请基于以下客户需求和平台知识库，生成红人营销方案草稿。',
-      '请使用 Markdown，明确区分事实依据、推断和待客户确认项；知识引用沿用系统提供的 [KB-n] 标记。',
-      '必须包含：执行摘要、市场/竞品判断、达人类型与平台建议、60-30-10预算建议、执行时间线、KPI、风险与下一步确认项。',
-      template.name ? '方案模板：' + String(template.name).slice(0, 160) : '',
-      template.description ? '模板说明：' + String(template.description).slice(0, 600) : '',
-      templateSections.length ? '模板章节：' + templateSections.join('；') : '',
-      demandAudit.length ? '审计上下文：' + demandAudit.join('，') : '',
-      '',
-      demandText
-    ].filter(Boolean).join('\n');
+    const prompt = latestUiCompat.buildProposalDraftPrompt({
+      demandText,
+      template,
+      auditContext: demandAudit
+    });
     const result = await aiService.handleChat(db, {
       user: req.user,
       organizationId: req.authContext.organization.id,
@@ -3112,7 +3103,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
       knowledgeLimit: 8,
       archiveSummary: false,
       atomicOneShot: true,
-      max_tokens: 3200
+      max_tokens: 5200
     });
     if (!linkedRequest) {
       demandEntry = knowledgeService.ingestBusinessArtifact(db, {

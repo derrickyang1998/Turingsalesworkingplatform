@@ -376,7 +376,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "e57e624e1e13253e2a49ca5a7478fa3aff80c63567f27c12d2381fda194fe15d"
+      "sha256": "800d82b46daa87555c10654307c12d76fd6b9225bcf1785cfa0d60a7d3577279"
     },
     {
       "path": "server/workflow_engine.js",
@@ -500,7 +500,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "ef2e3f2ff17dc96c45f33d0ad7f5f14c11ec54fda692f6a0c50292ca9d4c4e58"
+      "sha256": "e4a998a70fa915a9ff340061ad12787d14d992def96b2efa618c0151e0283043"
     },
     {
       "path": "server/services/llm_service.js",
