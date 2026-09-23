@@ -16063,7 +16063,7 @@ function switchPage(id, options) {
     var evidence = section.evidence_labels.length
       ? '<span class="tm-evidence">' + section.evidence_labels.map(htmlEscape).join(' / ') + '</span>'
       : '';
-    return '<header class="tm-slide-header"><div class="tm-brand">TuringMarket <span>图灵集市</span></div><div class="tm-page">'
+    return '<header class="tm-slide-header"><div class="tm-brand" aria-label="TuringMarket 图灵集市">TuringMarket 图灵集市</div><div class="tm-page">'
       + String(index + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0') + '</div></header>'
       + '<div class="tm-section-meta"><span>' + htmlEscape(section.kicker || section.note || section.type) + '</span>'
       + '<span class="tm-status tm-status-' + htmlEscape(section.status) + '">' + deckStatusLabel(section.status) + '</span>' + evidence + '</div>';
