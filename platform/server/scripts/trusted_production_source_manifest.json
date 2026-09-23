@@ -508,7 +508,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-                  "sha256": "0f0b38808d22b98235791e64659318a863fdad48cfc6a19f93070e44f3a9cec5"
+      "sha256": "56362e3446ecbe4f00bc1a5622200f860a88892c4a9b93ac70e675b27e2c5d3a"
     },
     {
       "path": "server/services/llm_service.js",
