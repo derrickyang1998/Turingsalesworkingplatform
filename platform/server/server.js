@@ -154,6 +154,7 @@ const {
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
+const registerAdminOperationsRoutes = require('./routes_admin_operations');
 const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
 const registerAdminAIConcurrencyRoutes = require('./routes_admin_ai_concurrency');
 const registerOrganizationBillingRoutes = require('./routes_organization_billing');
@@ -2310,6 +2311,7 @@ require('./routes_customers')(app, db, authMiddleware, {
   crmPermissionAudit: writeCrmPermissionAudit
 });
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
+registerAdminOperationsRoutes(app, db, { authMiddleware, adminOnly });
 registerAdminAIQuotaRoutes(app, db, { authMiddleware, adminOnly, service: aiQuotaService });
 registerAdminAIConcurrencyRoutes(app, db, {
   authMiddleware,

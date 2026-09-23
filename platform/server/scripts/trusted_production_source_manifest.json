@@ -335,6 +335,10 @@
       "sha256": "828e8b4dd23ed40500da1640d4fc7083d5ff88bee997c64365b9a5e1fc5b4789"
     },
     {
+      "path": "server/routes_admin_operations.js",
+      "sha256": "91a40047d2516db63d8d0e6160e2d9a2e7a52e18c16407f841b8595441a54897"
+    },
+    {
       "path": "server/routes_brands.js",
       "sha256": "19bba4b3ad4a6dfec059c35a63c2f266a4465318d730a5fe253603db4f733183"
     },
@@ -376,7 +380,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "800d82b46daa87555c10654307c12d76fd6b9225bcf1785cfa0d60a7d3577279"
+      "sha256": "caa8770be12d05cc8432d9b5f6231780e01c03864994d94e6850c2c5afa024aa"
     },
     {
       "path": "server/workflow_engine.js",
@@ -385,6 +389,10 @@
     {
       "path": "server/services/admin_tenant_directory_service.js",
       "sha256": "0b29cff375655492c4ce4373a0ead63ccc6d48ab057f9bfa5d3c6e80320ce1fe"
+    },
+    {
+      "path": "server/services/admin_operations_service.js",
+      "sha256": "01eedbc68bcbad20f66f5adb0234c9694efbfc4fd58335b2233434b5cb1ee7a2"
     },
     {
       "path": "server/services/ai_cost_service.js",

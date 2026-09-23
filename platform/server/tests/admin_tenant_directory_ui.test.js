@@ -115,7 +115,7 @@ test('existing admin control room exposes the organization directory as a routed
     assert.match(indexSource, new RegExp(`id=["']${id}["']`));
   }
   assert.match(navigationSource, /ADMIN_TABS\s*=\s*\[[^\]]*['"]organizations['"]/);
-  assert.match(appSource, /\['overview','users','organizations','knowledge','ai-audit','tokens'\]/);
+  assert.match(appSource, /\['overview','users','organizations','knowledge','ai-audit','tokens','operations'\]/);
 });
 
 test('organization directory renders an authoritative plan selector only when assignment is allowed', async () => {

@@ -10042,13 +10042,56 @@ function clearChat() {
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
 function switchAdminTab(tab, options) { options = options || {}; if (!currentUserIsPlatformAdministrator() && tab !== 'organizations') tab = 'organizations'; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
-  ['overview','users','organizations','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+  ['overview','users','organizations','knowledge','ai-audit','tokens','operations'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
   if (tab === 'organizations') loadAdminPlanCatalog().then(function() { return loadAdminOrganizations(); });
   if (tab === 'knowledge') loadKnowledgeBase();
   if (tab === 'ai-audit') { loadAdminAIAuditUsers(); loadAdminAIAudit(); }
   if (tab === 'tokens') loadAdminTokens();
+  if (tab === 'operations') loadAdminOperations();
+}
+
+function renderAdminOperations(data) {
+  data = data && typeof data === 'object' ? data : {};
+  var summary = data.summary && typeof data.summary === 'object' ? data.summary : {};
+  var labels = { provider: 'Provider / 飞书', import: '导入', workflow: '工作流', security: '安全', other: '其他' };
+  var summaryEl = document.getElementById('ad_operationsSummary');
+  if (summaryEl) summaryEl.innerHTML = ['provider','import','workflow','security'].map(function(key) {
+    return '<div class="stat"><div class="stat-value">' + esc(String(Number(summary[key]) || 0)) + '</div><div class="stat-label">' + esc(labels[key]) + '</div></div>';
+  }).join('');
+  var events = Array.isArray(data.events) ? data.events : [];
+  var listEl = document.getElementById('ad_operationsList');
+  if (!listEl) return;
+  if (!events.length) { listEl.innerHTML = '<p class="tm-member-access-note">暂无匹配事件</p>'; return; }
+  listEl.innerHTML = '<table><thead style="position:sticky;top:0;background:#fff;z-index:1"><tr><th>时间</th><th>分类</th><th>动作</th><th>模块</th><th>操作者</th><th>详情</th></tr></thead><tbody>' + events.map(function(event) {
+    var actor = event.actor && (event.actor.display_name || event.actor.username) || '-';
+    return '<tr><td>' + esc(String(event.created_at || '').replace('T',' ').slice(0,19)) + '</td><td>' + esc(labels[event.category] || event.category || '-') + '</td><td>' + esc(event.action || '-') + '</td><td>' + esc(event.module || '-') + '</td><td>' + esc(actor) + '</td><td style="max-width:360px;white-space:pre-wrap;word-break:break-word">' + esc(event.details || '-') + '</td></tr>';
+  }).join('') + '</tbody></table>';
+}
+
+function loadAdminOperations() {
+  if (!currentUserIsPlatformAdministrator()) return Promise.resolve([]);
+  var q = document.getElementById('ad_operationsSearch');
+  var category = document.getElementById('ad_operationsCategory');
+  var params = new URLSearchParams();
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (category && category.value) params.set('category', category.value);
+  params.set('limit', '50');
+  var status = document.getElementById('ad_operationsStatus');
+  if (status) status.textContent = '正在加载运营事件…';
+  return apiFetch('/admin/operations?' + params.toString()).then(function(response) {
+    if (!response.ok) return response.json().then(function(body) { throw new Error(body.error || '运营事件加载失败'); });
+    return response.json();
+  }).then(function(data) {
+    renderAdminOperations(data);
+    if (status) status.textContent = '已加载 ' + (Array.isArray(data.events) ? data.events.length : 0) + ' 条事件 · 读取已写入管理员审计';
+    return data;
+  }).catch(function(error) {
+    if (status) status.textContent = error.message || '运营事件加载失败';
+    toast(status && status.textContent || '运营事件加载失败', 'error');
+    return null;
+  });
 }
 function loadAdminDashboard() {
   apiFetch('/admin/overview').then(function(r) { return r.json(); }).then(function(d) {
@@ -15813,7 +15856,7 @@ const TM_NAVIGATION_APP = (function() {
   }
 
   function visibleAdminTab() {
-    var tabs = ['overview','users','organizations','knowledge','ai-audit','tokens'];
+    var tabs = ['overview','users','organizations','knowledge','ai-audit','tokens','operations'];
     for (var i = 0; i < tabs.length; i++) {
       var el = document.getElementById('admin-tab-' + tabs[i]);
       if (el && el.style.display !== 'none') return tabs[i];
@@ -15899,7 +15942,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOperations', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];
