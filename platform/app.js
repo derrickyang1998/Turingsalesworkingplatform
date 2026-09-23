@@ -15911,3 +15911,401 @@ function switchPage(id, options) {
   });
   window.tmAppBuild = '20260630-auth-upload-fix';
 })();
+
+// ===== DECISION DECK V2 RENDERER =====
+(function initializeDecisionDeckRenderer(global) {
+  'use strict';
+
+  function htmlEscape(value) {
+    return String(value === undefined || value === null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function normalizePoints(value) {
+    if (Array.isArray(value)) {
+      return value.map(function(item) { return String(item || '').trim(); }).filter(Boolean).slice(0, 8);
+    }
+    return String(value || '').split(/[;；\n]+/).map(function(item) { return item.trim(); }).filter(Boolean).slice(0, 8);
+  }
+
+  function splitDeckPoint(value) {
+    var text = String(value || '').trim();
+    var separator = text.indexOf('|') >= 0 ? '|' : (text.indexOf('：') >= 0 ? '：' : ':');
+    var index = text.indexOf(separator);
+    if (index <= 0) return { label: text.slice(0, 22) || '要点', body: text || '待补充' };
+    return {
+      label: text.slice(0, index).trim() || '要点',
+      body: text.slice(index + separator.length).trim() || text
+    };
+  }
+
+  function normalizeLayout(section) {
+    var type = String(section && section.type || 'content').trim().toLowerCase();
+    var layout = String(section && section.layout || '').trim().toLowerCase();
+    var allowed = {
+      'cover-image': true,
+      recommendation: true,
+      'brief-register': true,
+      'four-challenges': true,
+      'evidence-table': true,
+      positioning: true,
+      'audience-scene': true,
+      sequence: true,
+      'boundary-columns': true,
+      'platform-roles': true,
+      'creator-mix': true,
+      scorecard: true,
+      'content-system': true,
+      'creative-split': true,
+      'format-storyboard': true,
+      'dark-guardrail': true,
+      timeline: true,
+      'asset-pillars': true,
+      'comparison-table': true,
+      'capability-proof': true,
+      'next-steps': true
+    };
+    if (allowed[layout]) return layout;
+    var byType = {
+      cover: 'cover-image', recommendation: 'recommendation', brief: 'brief-register', challenge: 'four-challenges',
+      market: 'evidence-table', research: 'evidence-table', sources: 'evidence-table', comparison: 'comparison-table',
+      positioning: 'positioning', audience: 'audience-scene', sequence: 'sequence', boundaries: 'boundary-columns',
+      platform: 'platform-roles', creator_mix: 'creator-mix', team: 'creator-mix', scoring: 'scorecard',
+      content_system: 'content-system', creative: 'creative-split', format: 'format-storyboard',
+      compliance: 'dark-guardrail', timeline: 'timeline', measurement: 'asset-pillars', kpi: 'asset-pillars',
+      commercial: 'comparison-table', stats: 'comparison-table', capability: 'capability-proof', next: 'next-steps',
+      closing: 'next-steps'
+    };
+    return byType[type] || 'content-system';
+  }
+
+  function normalizeDeck(data, demand) {
+    data = data && typeof data === 'object' ? data : {};
+    demand = demand && typeof demand === 'object' ? demand : {};
+    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || '';
+    var product = demand.product || demand.product_name || '';
+    var title = String(data.title || [brand, product, '海外红人营销方案'].filter(Boolean).join(' ') || '海外红人营销方案').trim();
+    var sections = Array.isArray(data.sections) ? data.sections.map(function(section) {
+      section = section && typeof section === 'object' ? section : {};
+      return {
+        title: String(section.title || '方案页').trim(),
+        type: String(section.type || 'content').trim(),
+        layout: normalizeLayout(section),
+        points: normalizePoints(section.points),
+        note: String(section.note || '').trim(),
+        kicker: String(section.kicker || '').trim(),
+        visual_brief: String(section.visual_brief || '').trim(),
+        evidence_labels: Array.isArray(section.evidence_labels) ? section.evidence_labels.map(String).filter(Boolean).slice(0, 6) : [],
+        status: ['confirmed', 'inference', 'pending'].indexOf(section.status) >= 0 ? section.status : 'inference'
+      };
+    }).filter(function(section) { return section.title || section.points.length; }) : [];
+    if (!sections.length || sections[0].type !== 'cover') {
+      sections.unshift({
+        title: title,
+        type: 'cover',
+        layout: 'cover-image',
+        points: [String(data.subtitle || '客户决策版')],
+        note: 'TuringMarket 图灵集市',
+        kicker: '',
+        visual_brief: '',
+        evidence_labels: [],
+        status: 'confirmed'
+      });
+    }
+    return {
+      title: title,
+      subtitle: String(data.subtitle || '客户决策版').trim(),
+      narrative: String(data.narrative || '').trim(),
+      brand: brand || String(title).split(/\s+/)[0] || 'CLIENT',
+      product: product,
+      sections: sections
+    };
+  }
+
+  function enrichLegacyOutline(normalized, source) {
+    normalized = normalized && typeof normalized === 'object' ? normalized : {};
+    source = source && typeof source === 'object' ? source : {};
+    var sourceSections = Array.isArray(source.sections) ? source.sections : [];
+    normalized.narrative = source.narrative || normalized.narrative || '';
+    normalized.sections = (normalized.sections || []).map(function(section, index) {
+      var rich = sourceSections.find(function(candidate) {
+        return candidate && String(candidate.title || '').trim() === String(section.title || '').trim();
+      }) || sourceSections[index] || {};
+      return Object.assign({}, section, {
+        layout: normalizeLayout(Object.assign({}, section, rich)),
+        kicker: String(rich.kicker || section.kicker || ''),
+        visual_brief: String(rich.visual_brief || section.visual_brief || ''),
+        evidence_labels: Array.isArray(rich.evidence_labels) ? rich.evidence_labels.map(String).filter(Boolean).slice(0, 6) : [],
+        status: ['confirmed', 'inference', 'pending'].indexOf(rich.status) >= 0 ? rich.status : (section.status || 'inference')
+      });
+    });
+    return normalized;
+  }
+
+  function deckStatusLabel(status) {
+    if (status === 'confirmed') return '已确认';
+    if (status === 'pending') return '待确认';
+    return '策略建议';
+  }
+
+  function titleClass(title) {
+    var length = String(title || '').length;
+    if (length > 34) return ' tm-title-compact';
+    if (length > 24) return ' tm-title-long';
+    return '';
+  }
+
+  function renderDeckChrome(deck, section, index, total) {
+    var evidence = section.evidence_labels.length
+      ? '<span class="tm-evidence">' + section.evidence_labels.map(htmlEscape).join(' / ') + '</span>'
+      : '';
+    return '<header class="tm-slide-header"><div class="tm-brand">TuringMarket <span>图灵集市</span></div><div class="tm-page">'
+      + String(index + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0') + '</div></header>'
+      + '<div class="tm-section-meta"><span>' + htmlEscape(section.kicker || section.note || section.type) + '</span>'
+      + '<span class="tm-status tm-status-' + htmlEscape(section.status) + '">' + deckStatusLabel(section.status) + '</span>' + evidence + '</div>';
+  }
+
+  function renderDeckFooter(deck) {
+    return '<footer class="tm-slide-footer"><span>' + htmlEscape(deck.brand) + '</span><span>TuringMarket 图灵集市海外红人营销提案</span></footer>';
+  }
+
+  function renderPointGrid(points, className) {
+    return '<div class="' + className + '">' + points.map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<article class="tm-item"><div class="tm-item-index">' + String(index + 1).padStart(2, '0') + '</div><h3>'
+        + htmlEscape(pair.label) + '</h3><p>' + htmlEscape(pair.body) + '</p></article>';
+    }).join('') + '</div>';
+  }
+
+  function renderCover(deck, section) {
+    var points = section.points.slice(0, 4);
+    return '<div class="tm-cover-copy"><div class="tm-cover-label">OVERSEAS INFLUENCER MARKETING</div><h1 class="tm-cover-title' + titleClass(section.title) + '">'
+      + htmlEscape(section.title || deck.title) + '</h1><p class="tm-cover-sub">' + htmlEscape(deck.subtitle) + '</p><div class="tm-cover-facts">'
+      + points.map(function(point) { var pair = splitDeckPoint(point); return '<div><strong>' + htmlEscape(pair.label) + '</strong><span>' + htmlEscape(pair.body === pair.label ? '' : pair.body) + '</span></div>'; }).join('')
+      + '</div></div><aside class="tm-cover-stage"><div class="tm-cover-client">' + htmlEscape(deck.brand) + '</div><div class="tm-cover-product">'
+      + htmlEscape(deck.product || '客户增长方案') + '</div><div class="tm-cover-thesis">' + htmlEscape(deck.narrative || '从客户问题出发，形成可执行、可审核、可复盘的方案。')
+      + '</div><div class="tm-cover-mark">TM</div></aside>';
+  }
+
+  function renderRecommendation(section) {
+    var points = section.points.slice(0, 4);
+    var lead = points.shift() || section.note || '';
+    return '<div class="tm-recommendation-lead">' + htmlEscape(splitDeckPoint(lead).body) + '</div>'
+      + renderPointGrid(points, 'tm-three-column');
+  }
+
+  function renderRegister(section) {
+    var points = section.points.slice(0, 7);
+    return '<div class="tm-register">' + points.map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      var urgent = /P0|待确认|缺口/.test(pair.label + pair.body);
+      return '<div class="tm-register-row' + (urgent ? ' tm-register-p0' : '') + '"><span>' + String(index + 1).padStart(2, '0') + '</span><strong>'
+        + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></div>';
+    }).join('') + '</div>';
+  }
+
+  function renderFourChallenges(section) {
+    return '<div class="tm-four-column">' + section.points.slice(0, 4).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<article class="tm-challenge"><div>' + String(index + 1).padStart(2, '0') + '</div><h3>' + htmlEscape(pair.label) + '</h3><p>' + htmlEscape(pair.body) + '</p></article>';
+    }).join('') + '</div>';
+  }
+
+  function renderEvidenceTable(section) {
+    return '<table class="tm-table"><thead><tr><th>议题</th><th>证据或现状</th><th>本方案处理</th></tr></thead><tbody>'
+      + section.points.slice(0, 6).map(function(point, index) {
+        var pair = splitDeckPoint(point);
+        return '<tr><td>' + htmlEscape(pair.label) + '</td><td>' + htmlEscape(pair.body) + '</td><td>'
+          + htmlEscape(index === 0 ? '作为本页判断依据' : (section.status === 'pending' ? '执行前复核' : '转化为执行动作')) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function renderPositioning(section) {
+    var points = section.points.slice(0, 4);
+    var lead = points.shift() || section.title;
+    return '<div class="tm-positioning"><blockquote>' + htmlEscape(splitDeckPoint(lead).body) + '</blockquote><div>'
+      + points.map(function(point) { var pair = splitDeckPoint(point); return '<p><strong>' + htmlEscape(pair.label) + '</strong><span>' + htmlEscape(pair.body) + '</span></p>'; }).join('')
+      + '</div></div>';
+  }
+
+  function renderAudience(section, deck) {
+    var visual = section.visual_brief || ('用真实场景说明 ' + (deck.product || '产品') + ' 与目标用户任务的关系。');
+    return '<div class="tm-audience"><div class="tm-audience-list">' + section.points.slice(0, 5).map(function(point) {
+      var pair = splitDeckPoint(point);
+      return '<div><strong>' + htmlEscape(pair.label) + '</strong><span>' + htmlEscape(pair.body) + '</span></div>';
+    }).join('') + '</div><aside class="tm-visual-direction"><span>SCENE DIRECTION</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
+      + htmlEscape(visual) + '</p></aside></div>';
+  }
+
+  function renderSequence(section) {
+    return '<div class="tm-sequence">' + section.points.slice(0, 6).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<div class="tm-sequence-step"><span>' + String(index + 1).padStart(2, '0') + '</span><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></div>';
+    }).join('') + '</div>';
+  }
+
+  function renderBoundaryColumns(section) {
+    return '<div class="tm-boundaries">' + section.points.slice(0, 3).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<article class="tm-boundary tm-boundary-' + index + '"><div>' + ['可使用', '待核实', '禁止'][index] + '</div><h3>' + htmlEscape(pair.label) + '</h3><p>' + htmlEscape(pair.body) + '</p></article>';
+    }).join('') + '</div>';
+  }
+
+  function renderRoleRows(section) {
+    return '<div class="tm-role-rows">' + section.points.slice(0, 6).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<div class="tm-role-row"><span>' + String(index + 1).padStart(2, '0') + '</span><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></div>';
+    }).join('') + '</div>';
+  }
+
+  function renderScorecard(section) {
+    return '<div class="tm-scorecard">' + section.points.slice(0, 7).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      var matched = (pair.body + ' ' + pair.label).match(/\b([0-9]{1,3})\b/);
+      var score = matched ? Math.max(8, Math.min(100, Number(matched[1]))) : Math.max(22, 88 - index * 11);
+      return '<div class="tm-score-row"><strong>' + htmlEscape(pair.label) + '</strong><div><i style="width:' + score + '%"></i></div><span>' + htmlEscape(pair.body) + '</span></div>';
+    }).join('') + '</div>';
+  }
+
+  function renderCreative(section, deck) {
+    var points = section.points.slice(0, 5);
+    return '<div class="tm-creative"><aside><span>CONTENT CONCEPT</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
+      + htmlEscape(section.visual_brief || '使用客户正式产品素材或与品类一致的概念场景示意。') + '</p></aside><div>'
+      + points.map(function(point) { var pair = splitDeckPoint(point); return '<article><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></article>'; }).join('')
+      + '</div></div>';
+  }
+
+  function renderStoryboard(section) {
+    return '<div class="tm-storyboard">' + section.points.slice(0, 5).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<article><span>' + String(index + 1).padStart(2, '0') + '</span><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></article>';
+    }).join('') + '</div>';
+  }
+
+  function renderTimelineV2(section) {
+    return '<div class="tm-timeline">' + section.points.slice(0, 6).map(function(point, index) {
+      var parts = String(point || '').split('|');
+      return '<article><div class="tm-timeline-dot">' + String(index + 1).padStart(2, '0') + '</div><strong>' + htmlEscape(parts[0] || ('阶段 ' + (index + 1))) + '</strong><span>'
+        + htmlEscape(parts[1] || '待确认') + '</span><p>' + htmlEscape(parts[2] || point) + '</p><small>' + htmlEscape(parts[3] || '阶段交付物') + '</small></article>';
+    }).join('') + '</div>';
+  }
+
+  function renderNextSteps(section) {
+    return '<div class="tm-next-steps">' + section.points.slice(0, 6).map(function(point, index) {
+      var pair = splitDeckPoint(point);
+      return '<div><span>' + String(index + 1).padStart(2, '0') + '</span><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></div>';
+    }).join('') + '</div>';
+  }
+
+  function renderSlideBody(section, deck) {
+    switch (section.layout) {
+      case 'recommendation': return renderRecommendation(section);
+      case 'brief-register': return renderRegister(section);
+      case 'four-challenges': return renderFourChallenges(section);
+      case 'evidence-table':
+      case 'comparison-table': return renderEvidenceTable(section);
+      case 'positioning': return renderPositioning(section);
+      case 'audience-scene': return renderAudience(section, deck);
+      case 'sequence': return renderSequence(section);
+      case 'boundary-columns': return renderBoundaryColumns(section);
+      case 'platform-roles':
+      case 'creator-mix': return renderRoleRows(section);
+      case 'scorecard': return renderScorecard(section);
+      case 'creative-split': return renderCreative(section, deck);
+      case 'format-storyboard': return renderStoryboard(section);
+      case 'dark-guardrail': return renderPointGrid(section.points.slice(0, 6), 'tm-guardrail-grid');
+      case 'timeline': return renderTimelineV2(section);
+      case 'next-steps': return renderNextSteps(section);
+      case 'asset-pillars':
+      case 'capability-proof':
+      case 'content-system':
+      default: return renderPointGrid(section.points.slice(0, 6), 'tm-content-grid');
+    }
+  }
+
+  function decisionDeckCSS() {
+    return [
+      ':root{--tm-purple:#6d28d9;--tm-purple-soft:#f2edff;--tm-black:#111318;--tm-yellow:#f4c95d;--tm-green:#169b62;--tm-red:#d94a4a;--tm-ink:#171923;--tm-muted:#667085;--tm-line:#d9dde7;--tm-paper:#ffffff;--tm-bg:#eef1f6;--tm-font:Inter,"Aptos","Microsoft YaHei","PingFang SC",sans-serif}',
+      '*{box-sizing:border-box;letter-spacing:0}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--tm-bg);font-family:var(--tm-font);color:var(--tm-ink)}',
+      '.tm-deck-viewport{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden}.tm-deck-stage{position:absolute;width:1920px;height:1080px;transform-origin:0 0;background:var(--tm-paper);overflow:hidden;box-shadow:0 24px 70px rgba(17,19,24,.18)}',
+      '.tm-deck-slide{position:absolute;inset:0;width:1920px;height:1080px;padding:64px 86px 58px;background:#fff;opacity:0;visibility:hidden;transform:translateX(36px);transition:opacity .28s ease,transform .28s ease;overflow:hidden}.tm-deck-slide.active{opacity:1;visibility:visible;transform:translateX(0)}',
+      '.tm-slide-header{height:42px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--tm-black);padding-bottom:14px}.tm-brand{font-size:19px;font-weight:900;color:var(--tm-purple)}.tm-brand span{font-size:16px;color:var(--tm-black);font-weight:800;margin-left:10px}.tm-page{font-size:15px;font-weight:800;color:var(--tm-muted)}',
+      '.tm-section-meta{height:42px;display:flex;align-items:center;gap:14px;margin-top:18px;font-size:14px;font-weight:800;color:var(--tm-purple);text-transform:uppercase}.tm-status,.tm-evidence{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--tm-line);border-radius:6px;color:var(--tm-muted);background:#fff;text-transform:none}.tm-status-confirmed{color:var(--tm-green);border-color:#a9dcc6}.tm-status-pending{color:#9b6a00;border-color:#ead28f;background:#fff9e8}',
+      '.tm-slide-title{font-size:48px;line-height:1.12;font-weight:900;margin:4px 0 34px;max-width:1500px}.tm-title-long{font-size:42px}.tm-title-compact{font-size:36px}.tm-slide-footer{position:absolute;left:86px;right:86px;bottom:28px;height:22px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--tm-line);padding-top:14px;font-size:12px;color:#8a91a3}',
+      '.tm-cover{padding:0;background:#fff;display:grid;grid-template-columns:47% 53%}.tm-cover.active{display:grid}.tm-cover-copy{padding:92px 80px 70px;background:var(--tm-black);color:#fff;display:flex;flex-direction:column;justify-content:center}.tm-cover-label{font-size:16px;font-weight:850;color:var(--tm-yellow);margin-bottom:34px}.tm-cover-title{font-size:64px;line-height:1.08;font-weight:950;margin:0 0 30px;max-width:720px}.tm-cover-title.tm-title-long{font-size:54px}.tm-cover-title.tm-title-compact{font-size:46px}.tm-cover-sub{font-size:22px;color:#d5d8e1;margin:0 0 48px}.tm-cover-facts{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #444854}.tm-cover-facts div{min-height:78px;padding:16px 14px 10px 0;border-bottom:1px solid #444854}.tm-cover-facts strong{display:block;font-size:19px}.tm-cover-facts span{display:block;font-size:14px;color:#aeb4c2;margin-top:5px}.tm-cover-stage{position:relative;padding:100px 86px;background:var(--tm-purple-soft);display:flex;flex-direction:column;justify-content:center}.tm-cover-client{font-size:24px;color:var(--tm-purple);font-weight:900}.tm-cover-product{font-size:72px;line-height:1.02;font-weight:950;color:var(--tm-black);margin:30px 0;max-width:780px}.tm-cover-thesis{font-size:24px;line-height:1.55;color:#4d5262;max-width:700px;border-left:8px solid var(--tm-yellow);padding-left:24px}.tm-cover-mark{position:absolute;right:70px;bottom:46px;font-size:150px;font-weight:950;color:#dcd2f8}',
+      '.tm-recommendation-lead{font-size:35px;line-height:1.4;font-weight:850;color:var(--tm-purple);max-width:1500px;margin-bottom:42px;padding-left:24px;border-left:8px solid var(--tm-yellow)}',
+      '.tm-three-column,.tm-content-grid,.tm-guardrail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:2px solid var(--tm-black);border-bottom:1px solid var(--tm-line)}.tm-content-grid{grid-template-columns:repeat(3,1fr)}.tm-item{min-height:210px;padding:28px 30px;border-right:1px solid var(--tm-line);border-bottom:1px solid var(--tm-line)}.tm-item:nth-child(3n){border-right:0}.tm-item-index{font-size:15px;color:var(--tm-purple);font-weight:900;margin-bottom:18px}.tm-item h3{font-size:24px;line-height:1.2;margin:0 0 14px}.tm-item p{font-size:18px;line-height:1.55;color:var(--tm-muted);margin:0}',
+      '.tm-register{border-top:2px solid var(--tm-black)}.tm-register-row{min-height:76px;display:grid;grid-template-columns:58px 290px 1fr;align-items:center;border-bottom:1px solid var(--tm-line);padding:0 18px}.tm-register-row>span{font-size:14px;color:var(--tm-purple);font-weight:900}.tm-register-row strong{font-size:20px}.tm-register-row p{font-size:18px;color:var(--tm-muted);margin:0}.tm-register-p0{background:#fff8dc;border-bottom-color:#e6cd76}',
+      '.tm-four-column{display:grid;grid-template-columns:repeat(4,1fr);border-top:2px solid var(--tm-black);height:500px}.tm-challenge{padding:34px 28px;border-right:1px solid var(--tm-line);display:flex;flex-direction:column}.tm-challenge:last-child{border-right:0}.tm-challenge>div{font-size:44px;font-weight:950;color:var(--tm-purple);margin-bottom:auto}.tm-challenge h3{font-size:25px;margin:18px 0}.tm-challenge p{font-size:18px;line-height:1.55;color:var(--tm-muted);margin:0}.tm-challenge:nth-child(4)>div{color:#b17a00}',
+      '.tm-table{width:100%;border-collapse:collapse;border-top:2px solid var(--tm-black);table-layout:fixed}.tm-table th{height:54px;background:var(--tm-black);color:#fff;text-align:left;padding:0 18px;font-size:16px}.tm-table th:first-child{width:24%}.tm-table th:last-child{width:26%}.tm-table td{height:76px;border-bottom:1px solid var(--tm-line);padding:14px 18px;font-size:17px;line-height:1.42;vertical-align:top}.tm-table td:first-child{font-weight:850;color:var(--tm-purple)}',
+      '.tm-positioning{display:grid;grid-template-columns:54% 46%;border-top:2px solid var(--tm-black);min-height:500px}.tm-positioning blockquote{font-size:42px;line-height:1.32;font-weight:900;margin:0;padding:62px 54px 30px 0;color:var(--tm-purple)}.tm-positioning>div{border-left:1px solid var(--tm-line);padding:36px}.tm-positioning p{display:grid;grid-template-columns:180px 1fr;gap:18px;padding:20px 0;margin:0;border-bottom:1px solid var(--tm-line)}.tm-positioning strong{font-size:19px}.tm-positioning span{font-size:17px;line-height:1.5;color:var(--tm-muted)}',
+      '.tm-audience,.tm-creative{display:grid;grid-template-columns:58% 42%;min-height:500px;border-top:2px solid var(--tm-black)}.tm-audience-list{padding-right:34px}.tm-audience-list>div{display:grid;grid-template-columns:220px 1fr;gap:24px;padding:24px 0;border-bottom:1px solid var(--tm-line)}.tm-audience-list strong{font-size:20px}.tm-audience-list span{font-size:18px;line-height:1.5;color:var(--tm-muted)}.tm-visual-direction,.tm-creative>aside{background:var(--tm-purple-soft);padding:46px;display:flex;flex-direction:column;justify-content:flex-end}.tm-visual-direction>span,.tm-creative>aside>span{font-size:14px;font-weight:900;color:var(--tm-purple)}.tm-visual-direction strong,.tm-creative>aside strong{font-size:50px;line-height:1.05;margin:22px 0}.tm-visual-direction p,.tm-creative>aside p{font-size:18px;line-height:1.55;color:var(--tm-muted)}',
+      '.tm-sequence{display:grid;grid-template-columns:repeat(5,1fr);border-top:2px solid var(--tm-black);min-height:480px}.tm-sequence-step{padding:34px 26px;border-right:1px solid var(--tm-line)}.tm-sequence-step:last-child{background:var(--tm-black);color:#fff;border-right:0}.tm-sequence-step>span{display:block;font-size:32px;font-weight:950;color:var(--tm-purple);margin-bottom:100px}.tm-sequence-step:last-child>span{color:var(--tm-yellow)}.tm-sequence-step strong{display:block;font-size:22px;margin-bottom:15px}.tm-sequence-step p{font-size:17px;line-height:1.5;color:var(--tm-muted)}.tm-sequence-step:last-child p{color:#cfd3dd}',
+      '.tm-boundaries{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.tm-boundary{min-height:430px;padding:34px;border:1px solid var(--tm-line);border-top-width:8px;border-radius:6px}.tm-boundary>div{font-size:14px;font-weight:900;margin-bottom:90px}.tm-boundary h3{font-size:28px;margin:0 0 20px}.tm-boundary p{font-size:19px;line-height:1.6;color:var(--tm-muted)}.tm-boundary-0{border-top-color:var(--tm-green)}.tm-boundary-1{border-top-color:var(--tm-yellow)}.tm-boundary-2{border-top-color:var(--tm-red)}',
+      '.tm-role-rows{border-top:2px solid var(--tm-black)}.tm-role-row{display:grid;grid-template-columns:70px 300px 1fr;min-height:86px;align-items:center;border-bottom:1px solid var(--tm-line)}.tm-role-row>span{font-size:15px;font-weight:900;color:var(--tm-purple)}.tm-role-row strong{font-size:22px}.tm-role-row p{font-size:18px;line-height:1.45;color:var(--tm-muted);margin:0}',
+      '.tm-scorecard{display:grid;gap:18px}.tm-score-row{display:grid;grid-template-columns:300px 1fr 320px;gap:24px;align-items:center}.tm-score-row strong{font-size:19px}.tm-score-row>div{height:14px;background:#eceef3;border-radius:6px;overflow:hidden}.tm-score-row i{display:block;height:100%;background:var(--tm-purple);border-radius:6px}.tm-score-row span{font-size:16px;color:var(--tm-muted)}',
+      '.tm-creative>aside{background:var(--tm-black);color:#fff}.tm-creative>aside>span{color:var(--tm-yellow)}.tm-creative>aside strong{color:#fff}.tm-creative>aside p{color:#cfd3dd}.tm-creative>div{padding:10px 0 0 42px}.tm-creative article{display:grid;grid-template-columns:190px 1fr;gap:20px;padding:22px 0;border-bottom:1px solid var(--tm-line)}.tm-creative article strong{font-size:20px}.tm-creative article p{font-size:18px;line-height:1.5;color:var(--tm-muted);margin:0}',
+      '.tm-storyboard{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.tm-storyboard article{min-height:420px;padding:28px 22px;border:1px solid var(--tm-line);border-top:7px solid var(--tm-purple);border-radius:6px}.tm-storyboard article:first-child{background:var(--tm-black);color:#fff;border-color:var(--tm-black);border-top-color:var(--tm-yellow)}.tm-storyboard span{font-size:13px;font-weight:900;color:var(--tm-purple)}.tm-storyboard article:first-child span{color:var(--tm-yellow)}.tm-storyboard strong{display:block;font-size:21px;margin:90px 0 16px}.tm-storyboard p{font-size:16px;line-height:1.5;color:var(--tm-muted)}.tm-storyboard article:first-child p{color:#cfd3dd}',
+      '.tm-layout-dark-guardrail,.tm-layout-capability-proof{background:var(--tm-black);color:#fff}.tm-layout-capability-proof{background:#201638}.tm-layout-dark-guardrail .tm-slide-header,.tm-layout-capability-proof .tm-slide-header{border-color:#fff}.tm-layout-dark-guardrail .tm-brand span,.tm-layout-capability-proof .tm-brand span,.tm-layout-dark-guardrail .tm-page,.tm-layout-capability-proof .tm-page{color:#fff}.tm-layout-dark-guardrail .tm-slide-footer,.tm-layout-capability-proof .tm-slide-footer{border-color:#545762;color:#b8bdca}.tm-layout-dark-guardrail .tm-item,.tm-layout-capability-proof .tm-item{border-color:#545762}.tm-layout-dark-guardrail .tm-item h3,.tm-layout-capability-proof .tm-item h3{color:#fff}.tm-layout-dark-guardrail .tm-item p,.tm-layout-capability-proof .tm-item p{color:#c8ccd6}.tm-layout-dark-guardrail .tm-item-index{color:var(--tm-yellow)}',
+      '.tm-timeline{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-top:2px solid var(--tm-black);padding-top:40px}.tm-timeline article{position:relative;min-height:390px;padding:60px 26px 20px;border-right:1px solid var(--tm-line)}.tm-timeline article:last-child{border-right:0}.tm-timeline-dot{position:absolute;top:-16px;left:26px;width:34px;height:34px;border-radius:50%;background:var(--tm-purple);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:900}.tm-timeline strong{display:block;font-size:22px}.tm-timeline span{display:block;color:var(--tm-purple);font-size:16px;font-weight:800;margin:8px 0 28px}.tm-timeline p{font-size:17px;line-height:1.5;color:var(--tm-muted)}.tm-timeline small{display:block;margin-top:24px;font-size:14px;color:var(--tm-black);font-weight:800}',
+      '.tm-next-steps{border-top:2px solid var(--tm-black)}.tm-next-steps>div{display:grid;grid-template-columns:80px 310px 1fr;min-height:88px;align-items:center;border-bottom:1px solid var(--tm-line)}.tm-next-steps span{font-size:18px;font-weight:950;color:var(--tm-purple)}.tm-next-steps strong{font-size:21px}.tm-next-steps p{font-size:18px;color:var(--tm-muted);margin:0}',
+      '.tm-deck-controls{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:14px;padding:9px 12px;background:var(--tm-black);color:#fff;border-radius:6px}.tm-deck-controls button{width:38px;height:34px;border:1px solid #555a66;background:#22252d;color:#fff;border-radius:5px;font-size:18px;cursor:pointer}.tm-deck-counter{font-size:13px;min-width:72px;text-align:center}.tm-deck-progress{position:fixed;left:0;bottom:0;height:5px;background:var(--tm-purple);width:0;z-index:31;transition:width .2s ease}',
+      '@media print{html,body{overflow:visible;background:#fff}.tm-deck-viewport{position:static;display:block}.tm-deck-stage{position:static;width:1920px;height:auto;transform:none!important;box-shadow:none}.tm-deck-slide{position:relative;opacity:1;visibility:visible;transform:none;page-break-after:always}.tm-deck-controls,.tm-deck-progress{display:none}}'
+    ].join('');
+  }
+
+  function decisionDeckRuntime() {
+    return '(function(){var slides=[].slice.call(document.querySelectorAll(".tm-deck-slide"));var stage=document.getElementById("deckStage");var counter=document.getElementById("deckCounter");var progress=document.getElementById("deckProgress");var buttons=document.querySelectorAll(".tm-deck-controls button");var index=0;function fit(){var scale=Math.min(innerWidth/1920,innerHeight/1080);var x=(innerWidth-1920*scale)/2;var y=(innerHeight-1080*scale)/2;stage.style.transform="translate("+x+"px,"+y+"px) scale("+scale+")"}function show(next){index=Math.max(0,Math.min(slides.length-1,next));slides.forEach(function(slide,i){slide.classList.toggle("active",i===index)});counter.textContent=(index+1)+" / "+slides.length;progress.style.width=((index+1)/slides.length*100)+"%"}function next(){show(index+1)}function prev(){show(index-1)}if(buttons[0])buttons[0].addEventListener("click",prev);if(buttons[1])buttons[1].addEventListener("click",next);addEventListener("resize",fit);addEventListener("keydown",function(event){if(event.key==="ArrowRight"||event.key==="PageDown"||event.key===" ")next();if(event.key==="ArrowLeft"||event.key==="PageUp")prev();if(event.key==="Home")show(0);if(event.key==="End")show(slides.length-1)});window.deck={next:next,prev:prev,show:show,fit:fit};fit();show(0)})();';
+  }
+
+  function buildDecisionDeckHTML(data, demand) {
+    var deck = normalizeDeck(data, demand || global.curDemand || {});
+    var total = deck.sections.length;
+    var slides = deck.sections.map(function(section, index) {
+      var classes = ['tm-deck-slide', 'tm-layout-' + section.layout];
+      if (section.type === 'cover') classes.push('tm-cover');
+      var body = section.type === 'cover'
+        ? renderCover(deck, section)
+        : renderDeckChrome(deck, section, index, total)
+          + '<h2 class="tm-slide-title' + titleClass(section.title) + '">' + htmlEscape(section.title) + '</h2>'
+          + renderSlideBody(section, deck)
+          + renderDeckFooter(deck);
+      return '<section class="' + classes.join(' ') + (index === 0 ? ' active' : '') + '" data-layout="' + htmlEscape(section.layout) + '">' + body + '</section>';
+    }).join('');
+    return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'
+      + htmlEscape(deck.title) + '</title><style>' + decisionDeckCSS() + '</style></head><body><div class="tm-deck-viewport"><main class="tm-deck-stage" id="deckStage">'
+      + slides + '</main></div><div class="tm-deck-controls"><button type="button" aria-label="上一页">‹</button><span class="tm-deck-counter" id="deckCounter">1 / '
+      + total + '</span><button type="button" aria-label="下一页">›</button></div><div class="tm-deck-progress" id="deckProgress"></div><script>'
+      + decisionDeckRuntime() + '<\/script></body></html>';
+  }
+
+  function install() {
+    if (global.__tmDecisionDeckV2Installed) return;
+    var legacyNormalize = typeof global.normalizePPTData === 'function' ? global.normalizePPTData : null;
+    if (legacyNormalize) {
+      global.normalizePPTData = function(data) {
+        return enrichLegacyOutline(legacyNormalize(data), data);
+      };
+    }
+    global.buildRevealHTML = function(data) {
+      return buildDecisionDeckHTML(data, global.curDemand || {});
+    };
+    global.__tmDecisionDeckV2Installed = true;
+  }
+
+  global.TMDecisionDeckRenderer = Object.freeze({
+    build: buildDecisionDeckHTML,
+    normalize: normalizeDeck,
+    install: install
+  });
+
+  if (global.document && global.document.readyState === 'loading') {
+    global.document.addEventListener('DOMContentLoaded', install, { once: true });
+  } else {
+    install();
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
