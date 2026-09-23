@@ -99,7 +99,8 @@ function createAdminOperationsService(db) {
       const actorUserId = assertPlatformAdmin(db, options.actor);
       const classification = categorySql();
       const where = `
-        WHERE (? IS NULL OR activity.id < ?)
+        WHERE activity.action != 'admin_operations_read'
+          AND (? IS NULL OR activity.id < ?)
           AND (?='' OR (
             instr(lower(COALESCE(activity.action,'')),lower(?))>0 OR
             instr(lower(COALESCE(activity.module,'')),lower(?))>0 OR

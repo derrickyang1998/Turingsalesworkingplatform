@@ -392,7 +392,7 @@
     },
     {
       "path": "server/services/admin_operations_service.js",
-      "sha256": "01eedbc68bcbad20f66f5adb0234c9694efbfc4fd58335b2233434b5cb1ee7a2"
+      "sha256": "1e3572bd3d080bf5e28db9a8d6759dd94023f3e1664ef6c5685f8f40a73b874a"
     },
     {
       "path": "server/services/ai_cost_service.js",
@@ -508,7 +508,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "56362e3446ecbe4f00bc1a5622200f860a88892c4a9b93ac70e675b27e2c5d3a"
+      "sha256": "9eda8b2dc1b0f8d3aa3c80a3ad96e95fe47c12147439ac1877b75d8e6b2128e2"
     },
     {
       "path": "server/services/llm_service.js",

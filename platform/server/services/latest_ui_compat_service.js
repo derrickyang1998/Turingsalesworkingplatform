@@ -365,8 +365,9 @@ function buildPptOutlinePrompt(input) {
     '为 TuringMarket 生成客户决策型海外红人营销演示大纲。HTMLPPT 与 PPTX 将共用这份结构化数据。',
     '只返回 JSON，不要 Markdown 代码块或解释。顶层字段：title, subtitle, narrative, brand, product, sections。brand 与 product 必须沿用需求表原文。',
     'sections 必须正好 24 页且包含封面。约80%页面回答客户的产品、市场、策略、内容、执行和衡量问题，约20%页面用于图灵能力证明，并把公司能力放在后段。',
-    '每页字段：title, type, layout, points, note, kicker, visual_brief, evidence_labels, status。points 为 2-6 条短句；evidence_labels 为 [KB-n] 或公开来源标签数组；status 只能是 confirmed、inference、pending。',
+    '每页字段：slot_key, title, type, layout, points, note, kicker, visual_brief, evidence_labels, status。points 为 2-6 条短句；evidence_labels 为 [KB-n] 或公开来源标签数组；status 只能是 confirmed、inference、pending。',
     '固定顺序：1 cover；2 recommendation；3 brief；4 challenge；5 market；6 comparison；7 positioning；8 audience；9 sequence；10 boundaries；11 platform；12 creator_mix；13 scoring；14 content_system；15-16 creative；17-18 format（长视频、短视频各一页）；19 compliance；20 timeline；21 measurement；22 commercial；23 capability；24 next。不得删减、合并或调换页面。',
+    'slot_key 必须依次为：cover, recommendation, brief, challenge, market, comparison, positioning, audience, sequence, boundaries, platform, creator_mix, scoring, content_system, creative_primary, creative_search, format_long, format_short, compliance, timeline, measurement, commercial, capability, next。',
     'layout 从 cover-image, recommendation, brief-register, four-challenges, evidence-table, positioning, audience-scene, sequence, boundary-columns, platform-roles, creator-mix, scorecard, content-system, creative-split, format-storyboard, dark-guardrail, timeline, asset-pillars, comparison-table, capability-proof, next-steps 中选择。',
     '页面标题必须表达本页判断，避免“市场分析”“内容策略”等空标题。先写结论，再给证据和动作。每页只解决一个问题。',
     '不得编造产品功能、认证、团队、案例、数据、价格、投放结果或图片。visual_brief 只描述应使用的真实产品/场景视觉；没有已授权素材时明确写“使用客户提供素材或概念场景示意”。',
@@ -388,10 +389,18 @@ function pptSection(title, type, layout, points, note, status, visualBrief) {
     note: note || '',
     kicker: '',
     visual_brief: visualBrief || '',
-    evidence_labels: [],
+    evidence_labels: type === 'cover' ? ['需求表/客户资料'] : [],
     status: status || 'inference'
   };
 }
+
+const PPT_DECISION_SLOT_KEYS = Object.freeze([
+  'cover', 'recommendation', 'brief', 'challenge', 'market', 'comparison',
+  'positioning', 'audience', 'sequence', 'boundaries', 'platform', 'creator_mix',
+  'scoring', 'content_system', 'creative_primary', 'creative_search',
+  'format_long', 'format_short', 'compliance', 'timeline', 'measurement',
+  'commercial', 'capability', 'next'
+]);
 
 function buildPptOutlineFallback(demand, proposal, reason, research) {
   demand = demand && typeof demand === 'object' ? demand : {};
@@ -401,13 +410,13 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
   const budget = demand.budget || demand.budget_range || '待确认';
   const platforms = [].concat(demand.platforms || demand.platform || ['YouTube', 'Instagram', 'TikTok']).filter(Boolean).join(' / ');
   const competitors = [].concat(demand.competitors || demand.competitor || []).filter(Boolean).join(' / ') || '待客户确认';
-  const proposalBrief = compactText(proposal || demand.usp || product, 180);
+  const proposalBrief = compactText(proposal || '', 180);
   const researchPoints = (research && research.results || []).slice(0, 3).map(function(item, index) {
     return '市场信号 ' + (index + 1) + '|' + compactText(item.title || item.snippet || item.url, 150);
   });
   const sections = [
     pptSection(brand + ' ' + product + ' 海外红人营销方案', 'cover', 'cover-image', [market, platforms, '预算口径|' + budget], reason || '客户汇报版', 'confirmed', '使用客户提供的产品主视觉；没有正式素材时使用与品类一致的概念场景示意。'),
-    pptSection('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再用表现最好的内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'], '执行建议', 'inference'),
+    pptSection('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再用表现最好的内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'].concat(proposalBrief ? ['人工确认方案|' + proposalBrief] : []), '执行建议', 'inference'),
     pptSection('先锁定产品事实，再锁定脚本卖点', 'brief', 'brief-register', ['品牌|' + brand, '产品|' + product, '市场|' + market, '预算|' + budget, 'P0待确认|SKU、功能与认证、价格库存、样品、购买链路、审核负责人'], '需求与信息边界', 'pending'),
     pptSection('本次项目要同时解决四个客户问题', 'challenge', 'four-challenges', ['品牌认知|目标受众为什么要关注', '产品理解|用一句话说清产品解决的问题', '内容可信|让演示和证据代替口号', '执行确定性|提前锁定样品、审核、档期和替补'], '项目挑战', 'inference'),
     pptSection('推广窗口由客户节奏与真实市场信号共同决定', 'market', 'evidence-table', researchPoints.length ? researchPoints : ['客户时间表|以正式上市和库存时间为准', '市场信号|当前未读取到可核验联网资料', '执行建议|先完成事实表和达人池，再确定上线节奏'], '市场窗口', researchPoints.length ? 'confirmed' : 'pending'),
@@ -431,6 +440,17 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
     pptSection('图灵的价值体现在执行证据与响应机制', 'capability', 'capability-proof', ['需求转译|把产品资料转成达人筛选、脚本和审核标准', '项目执行|名单、合同、寄样、内容审核和上线盯控', '数据复盘|统一回收链接、指标、评论和素材资产', '团队资料|只使用客户可核验的公司、团队与案例信息'], 'Why TuringMarket', 'confirmed'),
     pptSection('收到关键资料即可启动建联与排期', 'next', 'next-steps', ['Product Fact Sheet|功能、认证、安装和禁用表达', '量产与样品|数量、时间、寄送区域和库存', '价格与购买链路|零售价、套装、渠道、链接和优惠', '审核节奏|品牌负责人、法务/合规、反馈时限', '启动动作|确认后进入达人长名单与首轮报价'], '下一步', 'pending')
   ];
+  sections.forEach(function(section, index) {
+    section.slot_key = PPT_DECISION_SLOT_KEYS[index];
+  });
+  sections[0].evidence_labels = ['[需求表]'];
+  sections[2].evidence_labels = ['[需求表]'];
+  if (researchPoints.length) {
+    sections[4].evidence_labels = researchPoints.map(function(_point, index) {
+      return '[WEB-' + (index + 1) + ']';
+    });
+  }
+  sections[22].evidence_labels = ['[平台能力]'];
   return {
     title: brand + ' ' + product + ' 海外红人营销方案',
     subtitle: market + ' 客户决策版 / ' + budget,
@@ -622,11 +642,17 @@ function normalizePptOutline(value, fallback, research) {
   out.title = out.title || (fallback && fallback.title) || '海外红人营销方案';
   out.subtitle = out.subtitle || (fallback && fallback.subtitle) || '';
   out.narrative = out.narrative || (fallback && fallback.narrative) || '';
-  out.brand = out.brand || (fallback && fallback.brand) || '';
-  out.product = out.product || (fallback && fallback.product) || '';
+  out.brand = (fallback && fallback.brand) || out.brand || '';
+  out.product = (fallback && fallback.product) || out.product || '';
   function normalizeSection(sec, index) {
     sec = sec && typeof sec === 'object' ? sec : {};
+    const evidenceLabels = Array.isArray(sec.evidence_labels)
+      ? sec.evidence_labels.map(function(label) { return String(label).trim(); }).filter(Boolean).slice(0, 6)
+      : [];
+    let status = ['confirmed', 'inference', 'pending'].includes(sec.status) ? sec.status : 'inference';
+    if (status === 'confirmed' && evidenceLabels.length === 0) status = 'pending';
     return {
+      slot_key: String(sec.slot_key || '').trim(),
       title: sec.title || ('Slide ' + (index + 1)),
       type: sec.type || 'content',
       layout: sec.layout || sec.type || 'content',
@@ -634,34 +660,114 @@ function normalizePptOutline(value, fallback, research) {
       note: sec.note || '',
       kicker: sec.kicker || '',
       visual_brief: sec.visual_brief || '',
-      evidence_labels: Array.isArray(sec.evidence_labels) ? sec.evidence_labels.map(String).filter(Boolean) : [],
-      status: ['confirmed', 'inference', 'pending'].includes(sec.status) ? sec.status : 'inference'
+      evidence_labels: evidenceLabels,
+      status
     };
   }
   const generatedSections = (value && Array.isArray(value.sections) ? value.sections : [])
-    .map(normalizeSection)
+    .map(function(section, index) {
+      return Object.assign(normalizeSection(section, index), { _source_index: index });
+    })
     .filter(function(sec) { return sec.title; });
   const fallbackSections = (fallback && Array.isArray(fallback.sections) ? fallback.sections : [])
-    .map(normalizeSection)
+    .map(function(section, index) {
+      const normalized = normalizeSection(section, index);
+      normalized.slot_key = normalized.slot_key || PPT_DECISION_SLOT_KEYS[index] || '';
+      return normalized;
+    })
     .filter(function(sec) { return sec.title; });
-  if (fallbackSections.length === 24 && generatedSections.length !== 24) {
-    const generatedByType = new Map();
-    generatedSections.forEach(function(section) {
-      const type = String(section.type || 'content');
-      if (!generatedByType.has(type)) generatedByType.set(type, []);
-      generatedByType.get(type).push(section);
-    });
-    out.sections = fallbackSections.map(function(baseSection) {
-      const candidates = generatedByType.get(String(baseSection.type || 'content')) || [];
-      const candidate = candidates.shift();
-      if (!candidate) return baseSection;
-      return Object.assign({}, baseSection, candidate, {
-        type: baseSection.type,
-        layout: candidate.layout || baseSection.layout
+  out.unmapped_sections = [];
+  if (fallbackSections.length === PPT_DECISION_SLOT_KEYS.length && generatedSections.length) {
+    const fallbackBySlot = new Map(fallbackSections.map(function(section) {
+      return [section.slot_key, section];
+    }));
+    function inferredDuplicateSlot(section) {
+      const text = [section.title, section.note].concat(section.points || []).join(' ').toLowerCase();
+      if (section.type === 'creative') {
+        if (/搜索|对比|高意向|购买前|search|comparison/.test(text)) return 'creative_search';
+        if (/首批|真实|任务|场景|primary|real task|scene|creative 0?1/.test(text)) return 'creative_primary';
+      }
+      if (section.type === 'format') {
+        if (/youtube|长视频|long[- ]?form|深度/.test(text)) return 'format_long';
+        if (/tiktok|reels|shorts|短视频|short[- ]?form/.test(text)) return 'format_short';
+      }
+      return '';
+    }
+    function semanticSlot(section) {
+      const inferred = inferredDuplicateSlot(section);
+      const declaredBase = fallbackBySlot.get(section.slot_key);
+      const declared = declaredBase && String(declaredBase.type) === String(section.type)
+        ? section.slot_key
+        : '';
+      if (inferred && inferred !== declared) return inferred;
+      return declared || inferred;
+    }
+    const canonicalInput = generatedSections.length === fallbackSections.length
+      && generatedSections.every(function(section, index) {
+        if (String(section.type) !== String(fallbackSections[index].type)) return false;
+        const semantic = semanticSlot(section);
+        if (section.slot_key && section.slot_key !== fallbackSections[index].slot_key) return false;
+        return !semantic || semantic === fallbackSections[index].slot_key;
       });
+    const used = new Set();
+    function candidateIndex(baseSection, slotIndex) {
+      let index = generatedSections.findIndex(function(section, candidate) {
+        return !used.has(candidate) && semanticSlot(section) === baseSection.slot_key;
+      });
+      if (index >= 0) return index;
+      if (generatedSections[slotIndex]
+          && !used.has(slotIndex)
+          && String(generatedSections[slotIndex].type) === String(baseSection.type)) {
+        return slotIndex;
+      }
+      return generatedSections.findIndex(function(section, candidate) {
+        return !used.has(candidate) && String(section.type) === String(baseSection.type);
+      });
+    }
+    out.sections = fallbackSections.map(function(baseSection, slotIndex) {
+      const matchIndex = candidateIndex(baseSection, slotIndex);
+      if (matchIndex < 0) return Object.assign({}, baseSection);
+      used.add(matchIndex);
+      const candidate = generatedSections[matchIndex];
+      const merged = Object.assign({}, baseSection, candidate, {
+        type: baseSection.type,
+        slot_key: baseSection.slot_key,
+        layout: candidate.layout || baseSection.layout,
+        points: candidate.points.length ? candidate.points : baseSection.points,
+        evidence_labels: candidate.evidence_labels.length
+          ? candidate.evidence_labels
+          : baseSection.evidence_labels
+      });
+      if (slotIndex === 0) merged.title = (fallback && fallback.title) || baseSection.title;
+      if (merged.status === 'confirmed' && merged.evidence_labels.length === 0) merged.status = 'pending';
+      delete merged._source_index;
+      return merged;
     });
-    out.structure_repaired = true;
-    out.structure_warning = 'AI outline was normalized to the approved 24-page decision flow.';
+    out.unmapped_sections = generatedSections
+      .filter(function(_section, index) { return !used.has(index); })
+      .map(function(section) {
+        const copy = Object.assign({}, section);
+        delete copy._source_index;
+        return copy;
+      });
+    out.structure_repaired = !canonicalInput || out.unmapped_sections.length > 0;
+    out.structure_warning = out.structure_repaired
+      ? 'AI outline was normalized to the approved 24-page decision flow; unmatched content is visible on the brief page for review.'
+      : '';
+    if (out.structure_repaired && out.sections[2]) {
+      const unmatchedSummary = out.unmapped_sections.length
+        ? out.unmapped_sections.map(function(section) {
+            return section.title + ': ' + (section.points || []).join(' / ');
+          }).join('；')
+        : '页数、类型或顺序已按固定结构校正，请在导出前复核。';
+      const reviewPoint = '结构校验|' + unmatchedSummary;
+      const points = Array.isArray(out.sections[2].points) ? out.sections[2].points.slice() : [];
+      if (points.length < 7) points.push(reviewPoint);
+      else points[6] = points[6] + '；' + reviewPoint;
+      out.sections[2].points = points;
+      out.sections[2].kicker = '结构校验｜已按固定 24 页决策顺序修复';
+      out.sections[2].status = 'pending';
+    }
   } else {
     out.sections = generatedSections.length ? generatedSections : fallbackSections;
     out.structure_repaired = false;

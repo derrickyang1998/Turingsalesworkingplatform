@@ -881,6 +881,12 @@ test('preview runtime ignores Space on native controls while preserving arrow an
   assert.equal(counter.textContent, '2 / 3');
 });
 
+test('same-origin decision preview ignores Space on every interactive control', () => {
+  const source = read(cspCompatPath);
+  assert.match(source, /closest\(['"]button,input,select,textarea,a,\[contenteditable=true\]['"]\)/);
+  assert.match(source, /event\.key\s*===\s*['"] ['"]\s*&&\s*interactive/);
+});
+
 test('preview runtime reveals and progresses report decks without IntersectionObserver', () => {
   const { sections, navLinks, fades, bars, controls, counter, progress } = reportRuntimeFixture();
 

@@ -88,11 +88,10 @@ def normalize_payload(source):
     outline = source.get("outline") if isinstance(source.get("outline"), dict) else source
     demand = source.get("demand") if isinstance(source.get("demand"), dict) else {}
     brand = clean(
-        outline.get("brand") or source.get("brand") or demand.get("brand")
-        or demand.get("brand_name") or demand.get("company")
-        or demand.get("company_name"), "CLIENT")
-    product = clean(outline.get("product") or demand.get("product")
-                    or demand.get("product_name"))
+        demand.get("brand") or demand.get("brand_name") or demand.get("company")
+        or demand.get("company_name") or outline.get("brand") or source.get("brand"), "CLIENT")
+    product = clean(demand.get("product") or demand.get("product_name")
+                    or outline.get("product"))
     title = clean(outline.get("title") or source.get("title"),
                   f"{brand} 海外红人营销方案")
     subtitle = clean(outline.get("subtitle") or source.get("tagline"), "客户决策版")
@@ -121,7 +120,7 @@ def normalize_payload(source):
             "title": title, "type": "cover", "layout": "cover-image",
             "points": [subtitle], "note": "TuringMarket 图灵集市",
             "kicker": "", "visual_brief": "", "status": "confirmed",
-            "evidence_labels": [],
+            "evidence_labels": ["[需求表/客户资料]"],
         })
     return {
         "title": title, "subtitle": subtitle, "narrative": narrative,

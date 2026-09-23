@@ -110,12 +110,87 @@ test('existing admin control room exposes the organization directory as a routed
     'ad_ownerTransferReason',
     'ad_ownerTransferConfirmation',
     'ad_ownerTransferSubmit',
-    'ad_ownerTransferStatus'
+    'ad_ownerTransferStatus',
+    'admin-tab-operations',
+    'ad_operationsSearch',
+    'ad_operationsCategory',
+    'ad_operationsList',
+    'ad_operationsMore'
   ]) {
     assert.match(indexSource, new RegExp(`id=["']${id}["']`));
   }
   assert.match(navigationSource, /ADMIN_TABS\s*=\s*\[[^\]]*['"]organizations['"]/);
+  assert.match(navigationSource, /ADMIN_TABS\s*=\s*\[[^\]]*['"]operations['"]/);
   assert.match(appSource, /\['overview','users','organizations','knowledge','ai-audit','tokens','operations'\]/);
+  assert.match(appSource, /function\s+loadMoreAdminOperations\s*\(/);
+  assert.match(appSource, /adminOperationsNextCursor/);
+});
+
+test('operations paging ignores stale filters and coalesces repeated load-more requests', async () => {
+  const elements = {
+    ad_operationsSearch: { value: 'old' },
+    ad_operationsCategory: { value: '' },
+    ad_operationsStatus: { textContent: '' },
+    ad_operationsSummary: { innerHTML: '' },
+    ad_operationsList: { innerHTML: '' },
+    ad_operationsMore: { hidden: true, disabled: false }
+  };
+  const pending = [];
+  const calls = [];
+  const context = loadFunctions({
+    adminOperationsNextCursor: null,
+    adminOperationsEvents: [],
+    adminOperationsSummary: {},
+    adminOperationsRequestGeneration: 0,
+    adminOperationsLoadPromise: null,
+    currentUserIsPlatformAdministrator() { return true; },
+    document: { getElementById(id) { return elements[id] || null; } },
+    apiFetch(url) {
+      calls.push(url);
+      return new Promise((resolve) => pending.push(resolve));
+    },
+    esc,
+    toast() {},
+    URLSearchParams,
+    Promise,
+    Error,
+    Object,
+    Array,
+    String,
+    Number
+  }, ['renderAdminOperations', 'loadAdminOperations', 'loadMoreAdminOperations']);
+
+  const oldRequest = context.loadAdminOperations();
+  elements.ad_operationsSearch.value = 'new';
+  const newRequest = context.loadAdminOperations();
+  pending[1](response(200, {
+    events: [{ id: 2, action: 'NEW-EVENT', category: 'workflow', created_at: '2026-09-23T12:00:00Z' }],
+    summary: { workflow: 1 },
+    page: { has_more: true, next_cursor: 'cursor-2' }
+  }));
+  await newRequest;
+  pending[0](response(200, {
+    events: [{ id: 1, action: 'STALE-EVENT', category: 'security', created_at: '2026-09-23T11:00:00Z' }],
+    summary: { security: 1 },
+    page: { has_more: false, next_cursor: null }
+  }));
+  await oldRequest;
+  assert.match(elements.ad_operationsList.innerHTML, /NEW-EVENT/);
+  assert.doesNotMatch(elements.ad_operationsList.innerHTML, /STALE-EVENT/);
+
+  const firstMore = context.loadMoreAdminOperations();
+  const secondMore = context.loadMoreAdminOperations();
+  assert.equal(firstMore, secondMore);
+  assert.equal(calls.length, 3);
+  assert.match(calls[2], /cursor=cursor-2/);
+  pending[2](response(200, {
+    events: [{ id: 3, action: 'OLDER-EVENT', category: 'provider', created_at: '2026-09-23T10:00:00Z' }],
+    summary: {},
+    page: { has_more: false, next_cursor: null }
+  }));
+  await firstMore;
+  assert.match(elements.ad_operationsList.innerHTML, /NEW-EVENT/);
+  assert.match(elements.ad_operationsList.innerHTML, /OLDER-EVENT/);
 });
 
 test('organization directory renders an authoritative plan selector only when assignment is allowed', async () => {

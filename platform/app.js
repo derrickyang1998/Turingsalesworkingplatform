@@ -10041,6 +10041,11 @@ function clearChat() {
 }
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
+var adminOperationsNextCursor = null;
+var adminOperationsEvents = [];
+var adminOperationsSummary = {};
+var adminOperationsRequestGeneration = 0;
+var adminOperationsLoadPromise = null;
 function switchAdminTab(tab, options) { options = options || {}; if (!currentUserIsPlatformAdministrator() && tab !== 'organizations') tab = 'organizations'; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
   ['overview','users','organizations','knowledge','ai-audit','tokens','operations'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
@@ -10070,28 +10075,62 @@ function renderAdminOperations(data) {
   }).join('') + '</tbody></table>';
 }
 
-function loadAdminOperations() {
+function loadAdminOperations(options) {
   if (!currentUserIsPlatformAdministrator()) return Promise.resolve([]);
+  options = options && typeof options === 'object' ? options : {};
+  var append = options.append === true;
+  if (append && adminOperationsLoadPromise) return adminOperationsLoadPromise;
+  var requestGeneration = ++adminOperationsRequestGeneration;
+  if (!append) {
+    adminOperationsNextCursor = null;
+    adminOperationsEvents = [];
+    adminOperationsSummary = {};
+  }
   var q = document.getElementById('ad_operationsSearch');
   var category = document.getElementById('ad_operationsCategory');
   var params = new URLSearchParams();
   if (q && q.value.trim()) params.set('q', q.value.trim());
   if (category && category.value) params.set('category', category.value);
   params.set('limit', '50');
+  if (append && adminOperationsNextCursor) params.set('cursor', String(adminOperationsNextCursor));
   var status = document.getElementById('ad_operationsStatus');
   if (status) status.textContent = '正在加载运营事件…';
-  return apiFetch('/admin/operations?' + params.toString()).then(function(response) {
+  var more = document.getElementById('ad_operationsMore');
+  if (more) more.disabled = true;
+  var loadPromise = apiFetch('/admin/operations?' + params.toString()).then(function(response) {
     if (!response.ok) return response.json().then(function(body) { throw new Error(body.error || '运营事件加载失败'); });
     return response.json();
   }).then(function(data) {
-    renderAdminOperations(data);
-    if (status) status.textContent = '已加载 ' + (Array.isArray(data.events) ? data.events.length : 0) + ' 条事件 · 读取已写入管理员审计';
+    if (requestGeneration !== adminOperationsRequestGeneration) return null;
+    var nextEvents = Array.isArray(data.events) ? data.events : [];
+    adminOperationsEvents = append ? adminOperationsEvents.concat(nextEvents) : nextEvents;
+    if (!append) adminOperationsSummary = data.summary && typeof data.summary === 'object' ? data.summary : {};
+    adminOperationsNextCursor = data.page && data.page.has_more ? data.page.next_cursor : null;
+    renderAdminOperations(Object.assign({}, data, {
+      events: adminOperationsEvents,
+      summary: adminOperationsSummary
+    }));
+    if (more) {
+      more.hidden = !adminOperationsNextCursor;
+      more.disabled = !adminOperationsNextCursor;
+    }
+    if (status) status.textContent = '已加载 ' + adminOperationsEvents.length + ' 条事件 · 访问已写入管理员审计';
     return data;
   }).catch(function(error) {
+    if (requestGeneration !== adminOperationsRequestGeneration) return null;
     if (status) status.textContent = error.message || '运营事件加载失败';
     toast(status && status.textContent || '运营事件加载失败', 'error');
     return null;
+  }).then(function(result) {
+    if (adminOperationsLoadPromise === loadPromise) adminOperationsLoadPromise = null;
+    return result;
   });
+  adminOperationsLoadPromise = loadPromise;
+  return loadPromise;
+}
+function loadMoreAdminOperations() {
+  if (!adminOperationsNextCursor) return Promise.resolve(null);
+  return loadAdminOperations({ append: true });
 }
 function loadAdminDashboard() {
   apiFetch('/admin/overview').then(function(r) { return r.json(); }).then(function(d) {
@@ -15942,7 +15981,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOperations', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOperations', 'loadMoreAdminOperations', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];
@@ -16034,7 +16073,11 @@ function switchPage(id, options) {
     var title = String(data.title || [brand, product, '海外红人营销方案'].filter(Boolean).join(' ') || '海外红人营销方案').trim();
     var sections = Array.isArray(data.sections) ? data.sections.map(function(section) {
       section = section && typeof section === 'object' ? section : {};
+      var evidenceLabels = Array.isArray(section.evidence_labels) ? section.evidence_labels.map(function(label) { return String(label).trim(); }).filter(Boolean).slice(0, 6) : [];
+      var status = ['confirmed', 'inference', 'pending'].indexOf(section.status) >= 0 ? section.status : 'inference';
+      if (status === 'confirmed' && !evidenceLabels.length) status = 'pending';
       return {
+        slot_key: String(section.slot_key || '').trim(),
         title: String(section.title || '方案页').trim(),
         type: String(section.type || 'content').trim(),
         layout: normalizeLayout(section),
@@ -16042,12 +16085,13 @@ function switchPage(id, options) {
         note: String(section.note || '').trim(),
         kicker: String(section.kicker || '').trim(),
         visual_brief: String(section.visual_brief || '').trim(),
-        evidence_labels: Array.isArray(section.evidence_labels) ? section.evidence_labels.map(String).filter(Boolean).slice(0, 6) : [],
-        status: ['confirmed', 'inference', 'pending'].indexOf(section.status) >= 0 ? section.status : 'inference'
+        evidence_labels: evidenceLabels,
+        status: status
       };
     }).filter(function(section) { return section.title || section.points.length; }) : [];
     if (!sections.length || sections[0].type !== 'cover') {
       sections.unshift({
+        slot_key: 'cover',
         title: title,
         type: 'cover',
         layout: 'cover-image',
@@ -16055,7 +16099,7 @@ function switchPage(id, options) {
         note: 'TuringMarket 图灵集市',
         kicker: '',
         visual_brief: '',
-        evidence_labels: [],
+        evidence_labels: ['[需求表/客户资料]'],
         status: 'confirmed'
       });
     }
@@ -16091,9 +16135,9 @@ function switchPage(id, options) {
     var budget = demand.budget || demand.budget_range || '待确认';
     var platforms = [].concat(demand.platforms || demand.platform || ['YouTube', 'Instagram', 'TikTok']).filter(Boolean).join(' / ');
     var competitors = [].concat(demand.competitors || demand.competitor || []).filter(Boolean).join(' / ') || '待客户确认';
-    var proposalBrief = String(proposal || demand.usp || product).replace(/\s+/g, ' ').trim().slice(0, 180);
+    var proposalBrief = String(proposal || '').replace(/\s+/g, ' ').trim().slice(0, 180);
     var s = localDeckSection;
-    return {
+    var deck = {
       title: brand + ' ' + product + ' 海外红人营销方案',
       subtitle: market + ' 客户决策版 / ' + budget,
       narrative: '先建立产品理解与信任，再推动购买。',
@@ -16102,7 +16146,7 @@ function switchPage(id, options) {
       warning: reason || '',
       sections: [
         s(brand + ' ' + product + ' 海外红人营销方案', 'cover', 'cover-image', [market, platforms, '预算口径|' + budget], reason || '客户汇报版', 'confirmed', '使用客户正式产品主视觉或与品类一致的概念场景示意。'),
-        s('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再由高表现内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'], '执行建议'),
+        s('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再由高表现内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'].concat(proposalBrief ? ['人工确认方案|' + proposalBrief] : []), '执行建议'),
         s('先锁定产品事实，再锁定脚本卖点', 'brief', 'brief-register', ['品牌|' + brand, '产品|' + product, '市场|' + market, '预算|' + budget, 'P0待确认|SKU、功能与认证、价格库存、样品、购买链路、审核负责人'], '需求与信息边界', 'pending'),
         s('本次项目要同时解决四个客户问题', 'challenge', 'four-challenges', ['品牌认知|目标受众为什么要关注', '产品理解|用一句话说清产品解决的问题', '内容可信|让演示和证据代替口号', '执行确定性|提前锁定样品、审核、档期和替补'], '项目挑战'),
         s('推广窗口由客户节奏与真实市场信号共同决定', 'market', 'evidence-table', ['客户时间表|以正式上市和库存时间为准', '市场信号|接口失败时不编造联网资料', '执行建议|先完成事实表和达人池，再确定上线节奏'], '市场窗口', 'pending'),
@@ -16128,6 +16172,18 @@ function switchPage(id, options) {
       ],
       context_excerpt: proposalBrief
     };
+    var slotKeys = [
+      'cover', 'recommendation', 'brief', 'challenge', 'market', 'comparison',
+      'positioning', 'audience', 'sequence', 'boundaries', 'platform', 'creator_mix',
+      'scoring', 'content_system', 'creative_primary', 'creative_search',
+      'format_long', 'format_short', 'compliance', 'timeline', 'measurement',
+      'commercial', 'capability', 'next'
+    ];
+    deck.sections.forEach(function(section, index) { section.slot_key = slotKeys[index]; });
+    deck.sections[0].evidence_labels = ['[需求表]'];
+    deck.sections[2].evidence_labels = ['[需求表]'];
+    deck.sections[22].evidence_labels = ['[平台能力]'];
+    return deck;
   }
 
   function enrichLegacyOutline(normalized, source) {
@@ -16141,12 +16197,20 @@ function switchPage(id, options) {
       var rich = sourceSections.find(function(candidate) {
         return candidate && String(candidate.title || '').trim() === String(section.title || '').trim();
       }) || sourceSections[index] || {};
+      var evidenceLabels = Array.isArray(rich.evidence_labels)
+        ? rich.evidence_labels.map(function(label) { return String(label).trim(); }).filter(Boolean).slice(0, 6)
+        : [];
+      var status = ['confirmed', 'inference', 'pending'].indexOf(rich.status) >= 0
+        ? rich.status
+        : (section.status || 'inference');
+      if (status === 'confirmed' && !evidenceLabels.length) status = 'pending';
       return Object.assign({}, section, {
+        slot_key: String(rich.slot_key || section.slot_key || '').trim(),
         layout: normalizeLayout(Object.assign({}, section, rich)),
         kicker: String(rich.kicker || section.kicker || ''),
         visual_brief: String(rich.visual_brief || section.visual_brief || ''),
-        evidence_labels: Array.isArray(rich.evidence_labels) ? rich.evidence_labels.map(String).filter(Boolean).slice(0, 6) : [],
-        status: ['confirmed', 'inference', 'pending'].indexOf(rich.status) >= 0 ? rich.status : (section.status || 'inference')
+        evidence_labels: evidenceLabels,
+        status: status
       });
     });
     return normalized;
@@ -16365,7 +16429,7 @@ function switchPage(id, options) {
   }
 
   function decisionDeckRuntime() {
-    return '(function(){var slides=[].slice.call(document.querySelectorAll(".tm-deck-slide"));var stage=document.getElementById("deckStage");var counter=document.getElementById("deckCounter");var progress=document.getElementById("deckProgress");var buttons=document.querySelectorAll(".tm-deck-controls button");var index=0;function fit(){var scale=Math.min(innerWidth/1920,innerHeight/1080);var x=(innerWidth-1920*scale)/2;var y=(innerHeight-1080*scale)/2;stage.style.transform="translate("+x+"px,"+y+"px) scale("+scale+")"}function show(next){index=Math.max(0,Math.min(slides.length-1,next));slides.forEach(function(slide,i){slide.classList.toggle("active",i===index)});counter.textContent=(index+1)+" / "+slides.length;progress.style.width=((index+1)/slides.length*100)+"%"}function next(){show(index+1)}function prev(){show(index-1)}if(buttons[0])buttons[0].addEventListener("click",prev);if(buttons[1])buttons[1].addEventListener("click",next);addEventListener("resize",fit);addEventListener("keydown",function(event){if(event.key==="ArrowRight"||event.key==="PageDown"||event.key===" ")next();if(event.key==="ArrowLeft"||event.key==="PageUp")prev();if(event.key==="Home")show(0);if(event.key==="End")show(slides.length-1)});window.deck={next:next,prev:prev,show:show,fit:fit};fit();show(0)})();';
+    return '(function(){var slides=[].slice.call(document.querySelectorAll(".tm-deck-slide"));var stage=document.getElementById("deckStage");var counter=document.getElementById("deckCounter");var progress=document.getElementById("deckProgress");var buttons=document.querySelectorAll(".tm-deck-controls button");var index=0;function fit(){var scale=Math.min(innerWidth/1920,innerHeight/1080);var x=(innerWidth-1920*scale)/2;var y=(innerHeight-1080*scale)/2;stage.style.transform="translate("+x+"px,"+y+"px) scale("+scale+")"}function show(next){index=Math.max(0,Math.min(slides.length-1,next));slides.forEach(function(slide,i){slide.classList.toggle("active",i===index)});counter.textContent=(index+1)+" / "+slides.length;progress.style.width=((index+1)/slides.length*100)+"%"}function next(){show(index+1)}function prev(){show(index-1)}if(buttons[0])buttons[0].addEventListener("click",prev);if(buttons[1])buttons[1].addEventListener("click",next);addEventListener("resize",fit);addEventListener("keydown",function(event){var interactive=event.target&&event.target.closest&&event.target.closest("button,input,select,textarea,a,[contenteditable=true]");if(event.key===" "&&interactive)return;if(event.key==="ArrowRight"||event.key==="PageDown"||event.key===" "){event.preventDefault();next()}if(event.key==="ArrowLeft"||event.key==="PageUp"){event.preventDefault();prev()}if(event.key==="Home")show(0);if(event.key==="End")show(slides.length-1)});window.deck={next:next,prev:prev,show:show,fit:fit};fit();show(0)})();';
   }
 
   function buildDecisionDeckHTML(data, demand) {

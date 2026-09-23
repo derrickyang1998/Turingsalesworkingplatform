@@ -45,6 +45,29 @@ test('admin operations returns classified searchable events and auditable summar
   db.close();
 });
 
+test('admin operations read audit never feeds back into the operational event stream', () => {
+  const db = database();
+  const service = createAdminOperationsService(db);
+  service.listOperations({
+    actor: { id: 1, role: 'admin' },
+    requestId: 'first-read',
+    query: { category: 'all' }
+  });
+  const second = service.listOperations({
+    actor: { id: 1, role: 'admin' },
+    requestId: 'second-read',
+    query: { category: 'all' }
+  });
+  assert.equal(second.events.length, 4);
+  assert.equal(second.events.some((event) => event.action === 'admin_operations_read'), false);
+  assert.equal(second.summary.security, 1);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='admin_operations_read'").get().count,
+    2
+  );
+  db.close();
+});
+
 test('admin operations rejects non-admin actors and invalid categories', () => {
   const db = database();
   const service = createAdminOperationsService(db);

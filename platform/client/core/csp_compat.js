@@ -485,8 +485,17 @@
     if (controls[1]) controls[1].addEventListener('click', deck.next);
     popup.addEventListener('resize', fit);
     popup.addEventListener('keydown', function(event) {
-      if (event.key === 'ArrowRight' || event.key === 'PageDown' || (event.key === ' ' && String(event.target && event.target.tagName || '').toUpperCase() !== 'BUTTON')) deck.next();
-      if (event.key === 'ArrowLeft' || event.key === 'PageUp') deck.prev();
+      var interactive = event.target && event.target.closest
+        && event.target.closest('button,input,select,textarea,a,[contenteditable=true]');
+      if (event.key === ' ' && interactive) return;
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault();
+        deck.next();
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        event.preventDefault();
+        deck.prev();
+      }
       if (event.key === 'Home') show(0);
       if (event.key === 'End') show(slides.length - 1);
     });

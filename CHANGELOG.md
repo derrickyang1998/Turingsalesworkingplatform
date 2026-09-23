@@ -1,5 +1,18 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.28-admin-operations-and-decision-deck-hardening (Release Candidate, 2026-09-23) - 运营审计与 24 页决策型 PPT 稳定化
+
+### 交付范围 / Delivery Scope
+- 方案规划、HTMLPPT 与 PPTX 统一为已确认的 24 页客户决策结构；模型输出不足、超页、乱序或槽位声明错误时由服务端修复为固定顺序，未匹配内容进入可见的结构校验项，不再静默截断。
+- HTMLPPT 修复桌面端重复居中、移动端空白及弹窗脚本未加载问题；安全清洗后由同源控制器接管翻页、键盘、进度和自适应缩放。PPTX 继续输出可编辑的 16:9 原生形状，并保护长文案、评分数字、品牌与产品身份。
+- 既有 Campaign、私有知识库 RAG、需求与方案审计链、AI 草稿 -> 人工编辑/确认 -> 最终生成流程保持不变；冻结 `platform/ppt.js` SHA-256 仍为 `1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821`。
+- 管理控制室新增仅平台管理员可见的运维审计视图，支持按 Provider、导入、工作流、安全类别及关键词筛选活动记录、游标分页和并发请求防串页，并为每次读取写入审计。
+
+### 定向验证 / Focused Verification
+- JavaScript/Python/PowerShell 语法、差异检查与冻结文件摘要通过；决策型方案/PPT `9/9`、产品壳层 `40/40`、真实浏览器 PPT bridge `2/2`、Campaign/RAG `18/18`、管理员运维 `28/28`、受信任部署门禁 `4/4`，共 `101/101` 通过。
+- 独立审查先提出 1 个 P1 与 5 个 P2；请求代次、槽位校验、`slot_key` 透传、未匹配内容保留、证据去空白和交互控件 Space 键保护修复后，最终结论为 `APPROVE`，开放 P0-P2 为 0。
+- 生产部署、在线业务验收、可验证备份及公网发布守卫结果将在候选通过后回填；本条不提前声称上线。
+
 ## v0.9.27-decision-deck-preview-production (Production Deployed, 2026-09-23) - 客户决策型方案与 PPT 预览增量
 
 ### 交付范围 / Delivery Scope
