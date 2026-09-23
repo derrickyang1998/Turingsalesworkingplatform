@@ -9,6 +9,11 @@ const Database = require('better-sqlite3');
 const RELEASE_SMOKE_USERNAME = 'release-smoke';
 const RELEASE_SMOKE_DISPLAY_NAME = 'Release Smoke';
 const RELEASE_SMOKE_DEPARTMENT = 'platform_release';
+const RELEASE_SMOKE_TEAM_CODE = 'legacy-dept-' + crypto
+  .createHash('sha256')
+  .update(Buffer.from(RELEASE_SMOKE_DEPARTMENT, 'utf8'))
+  .digest('hex');
+const RELEASE_SMOKE_TEAM_ROLE = 'team_lead';
 
 function fail(code) {
   const error = new Error(code);
@@ -29,7 +34,7 @@ function defaultCreatePasswordHash() {
   return bcrypt.hashSync(password, bcrypt.genSaltSync(12));
 }
 
-function isExactExistingIdentity(db, user, organizationId) {
+function hasExactCoreIdentity(db, user, organizationId) {
   if (
     user.role !== 'admin'
     || user.display_name !== RELEASE_SMOKE_DISPLAY_NAME
@@ -68,6 +73,99 @@ function isExactExistingIdentity(db, user, organizationId) {
     && policies[0].access_mode === 'read_write';
 }
 
+function readReleaseSmokeTeam(db, organizationId) {
+  const team = db.prepare(`
+    SELECT id,name
+    FROM teams
+    WHERE org_id=? AND code=?
+  `).get(organizationId, RELEASE_SMOKE_TEAM_CODE);
+  if (team && team.name !== RELEASE_SMOKE_DEPARTMENT) {
+    fail('RELEASE_SMOKE_IDENTITY_CONFLICT');
+  }
+  return team || null;
+}
+
+function readTeamMemberships(db, userId) {
+  return db.prepare(`
+    SELECT org_id,team_id,role_code,status,revoked_at
+    FROM team_memberships
+    WHERE user_id=?
+    ORDER BY org_id,team_id
+  `).all(userId);
+}
+
+function isExactExistingIdentity(db, user, organizationId) {
+  if (!hasExactCoreIdentity(db, user, organizationId)) return false;
+  const team = readReleaseSmokeTeam(db, organizationId);
+  if (!team) return false;
+  const memberships = readTeamMemberships(db, user.id);
+  return memberships.length === 1
+    && Number(memberships[0].org_id) === organizationId
+    && Number(memberships[0].team_id) === Number(team.id)
+    && memberships[0].role_code === RELEASE_SMOKE_TEAM_ROLE
+    && memberships[0].status === 'active'
+    && memberships[0].revoked_at === null;
+}
+
+function ensureReleaseSmokeTeam(db, organizationId) {
+  const existing = readReleaseSmokeTeam(db, organizationId);
+  if (existing) return existing;
+  const inserted = db.prepare(`
+    INSERT INTO teams (org_id,code,name)
+    VALUES (?,?,?)
+  `).run(organizationId, RELEASE_SMOKE_TEAM_CODE, RELEASE_SMOKE_DEPARTMENT);
+  return { id: Number(inserted.lastInsertRowid), name: RELEASE_SMOKE_DEPARTMENT };
+}
+
+function insertReleaseSmokeTeamMembership(db, organizationId, userId) {
+  const team = ensureReleaseSmokeTeam(db, organizationId);
+  db.prepare(`
+    INSERT INTO team_memberships (org_id,team_id,user_id,role_code,status,revoked_at)
+    VALUES (?,?,?,?,'active',NULL)
+  `).run(organizationId, team.id, userId, RELEASE_SMOKE_TEAM_ROLE);
+}
+
+function writeSecurityAudit(db, userId, action, organizationId) {
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,NULL)
+  `).run(
+    userId,
+    action,
+    'security',
+    JSON.stringify({ username: RELEASE_SMOKE_USERNAME, organizationId, purpose: 'release_acceptance' })
+  );
+}
+
+function repairMissingTeamMembership(db, user, organizationId) {
+  const repair = db.transaction(() => {
+    const current = db.prepare(`
+      SELECT id,username,password_hash,display_name,role,department,api_quota,is_active
+      FROM users
+      WHERE id=? AND username=?
+    `).get(user.id, RELEASE_SMOKE_USERNAME);
+    if (
+      !current
+      || !hasExactCoreIdentity(db, current, organizationId)
+      || readTeamMemberships(db, current.id).length !== 0
+    ) {
+      fail('RELEASE_SMOKE_IDENTITY_CONFLICT');
+    }
+    insertReleaseSmokeTeamMembership(db, organizationId, current.id);
+    writeSecurityAudit(
+      db,
+      current.id,
+      'release_smoke_team_membership_repaired',
+      organizationId
+    );
+    if (!isExactExistingIdentity(db, current, organizationId)) {
+      fail('RELEASE_SMOKE_TEAM_PROVISION_FAILED');
+    }
+  });
+  repair.immediate();
+  return { status: 'repaired', username: RELEASE_SMOKE_USERNAME };
+}
+
 function provisionReleaseSmokeIdentity(db, options = {}) {
   if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
     throw new TypeError('release smoke identity provisioner requires a SQLite database');
@@ -84,10 +182,16 @@ function provisionReleaseSmokeIdentity(db, options = {}) {
     WHERE username=?
   `).get(RELEASE_SMOKE_USERNAME);
   if (existing) {
-    if (!isExactExistingIdentity(db, existing, organizationId)) {
-      fail('RELEASE_SMOKE_IDENTITY_CONFLICT');
+    if (isExactExistingIdentity(db, existing, organizationId)) {
+      return { status: 'existing', username: RELEASE_SMOKE_USERNAME };
     }
-    return { status: 'existing', username: RELEASE_SMOKE_USERNAME };
+    if (
+      hasExactCoreIdentity(db, existing, organizationId)
+      && readTeamMemberships(db, existing.id).length === 0
+    ) {
+      return repairMissingTeamMembership(db, existing, organizationId);
+    }
+    fail('RELEASE_SMOKE_IDENTITY_CONFLICT');
   }
 
   const createPasswordHash = typeof options.createPasswordHash === 'function'
@@ -129,15 +233,8 @@ function provisionReleaseSmokeIdentity(db, options = {}) {
     if (!memberPolicy || memberPolicy.access_mode !== 'read_write') {
       fail('RELEASE_SMOKE_POLICY_PROVISION_FAILED');
     }
-    db.prepare(`
-      INSERT INTO activity_log (user_id,action,module,details,ip_address)
-      VALUES (?,?,?,?,NULL)
-    `).run(
-      userId,
-      'release_smoke_identity_provisioned',
-      'security',
-      JSON.stringify({ username: RELEASE_SMOKE_USERNAME, organizationId, purpose: 'release_acceptance' })
-    );
+    insertReleaseSmokeTeamMembership(db, organizationId, userId);
+    writeSecurityAudit(db, userId, 'release_smoke_identity_provisioned', organizationId);
   });
   provision.immediate();
   return { status: 'created', username: RELEASE_SMOKE_USERNAME };

@@ -9,6 +9,7 @@
     "migrationCleanupUnit": "server/systemd/turingmarket-gate-cleanup.service",
     "parserBuilder": "server/scripts/build_upload_sandbox_runtime.sh",
     "parserProvisioner": "server/scripts/provision_upload_sandbox_runtime.sh",
+    "releaseSmokeIdentityProvisioner": "server/scripts/provision_release_smoke_identity.js",
     "parserCapacityPlanner": "server/scripts/check_cutover_capacity.py",
     "publicGuard": "server/scripts/public_release_guard.sh",
     "parserSelfTest": "server/scripts/upload_sandbox_self_test.js",
@@ -278,6 +279,10 @@
       "sha256": "18dabbb91c705357027b5acabbb465e6d51dacb4dbe122eb1005666b441f369d"
     },
     {
+      "path": "server/scripts/provision_release_smoke_identity.js",
+      "sha256": "c09dad4d053d1419a07063444e28a63f472954e4afc92837bb086c693ba28e4d"
+    },
+    {
       "path": "server/scripts/public_release_guard.sh",
       "sha256": "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
     },
@@ -299,7 +304,7 @@
     },
     {
       "path": "server/scripts/verify_ai_concurrency_acceptance.js",
-      "sha256": "42deece670e0a4dfeec9ca2e2411769a48081d5e40ac34b74322d077eb247e57"
+      "sha256": "1dd9def3cb1cb77b524635a316efabf14455b00871b1401301060ab344a52b30"
     },
     {
       "path": "server/scripts/verify_organization_billing_acceptance.js",

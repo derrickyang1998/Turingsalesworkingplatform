@@ -33,8 +33,8 @@ $EXPECTED_PPT_SHA256 = "1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8b
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "15fb525c8ed7e1543cc3afd4eeb528ddf333a2124ea8d88ec4e858ea4a69dc8f"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "85d8514f5f849631fc6c062e393cd4dc253580a189d21579a3014a30f4577bbe"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "2b7a00d7254677073eef87f990eb67cfd9ad373db900bea857a8e08ab87bb7e8"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "0eceb76054be5669061a4946437a43134a7de6c2a5cf4023d6c3cefa0262486c"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "dcd802c5bf90a2a6cbf8f773bb569534a1e69fcae6ba50b5e2a97174b0174a2e"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -241,6 +241,7 @@ $FILES = @(
     "server\scripts\lib\production_browser_evidence.js",
     "server\scripts\parse_upload_sandbox.sh",
     "server\scripts\provision_upload_sandbox_runtime.sh",
+    "server\scripts\provision_release_smoke_identity.js",
     "server\scripts\public_release_guard.sh",
     "server\scripts\rotate_user_credentials.js",
     "server\scripts\update_ui_baseline.js",
@@ -358,6 +359,7 @@ $FILES = @(
     "server\tests\admin_ai_concurrency_ui.test.js",
     "server\tests\organization_ai_concurrency_release_gate_inventory.test.js",
     "server\tests\verify_ai_concurrency_acceptance.test.js",
+    "server\tests\release_smoke_identity.test.js",
     "server\tests\protected_credentials_release_guard.test.js",
     "server\tests\organization_billing_migration.test.js",
     "server\tests\organization_billing_service.test.js",
@@ -11034,6 +11036,7 @@ node --test \
   server/tests/organization_ai_concurrency_migration.test.js \
   server/tests/ai_concurrency_service.test.js \
   server/tests/verify_ai_concurrency_acceptance.test.js \
+  server/tests/release_smoke_identity.test.js \
   server/tests/protected_credentials_release_guard.test.js \
   server/tests/admin_ai_concurrency_routes.test.js \
   server/tests/admin_ai_concurrency_ui.test.js \
@@ -14122,6 +14125,29 @@ done
 verify_candidate_health
 printf '%s\n' 'LOOPBACK_CANDIDATE_HEALTH_OK'
 persist_pm2_dump
+
+# Provision the dedicated, revocable acceptance identity against the adopted
+# production database before any authenticated release acceptance runs.
+cd "$LiveDir"
+RELEASE_SMOKE_PROVISION_OUTPUT="$({
+  NODE_ENV=production \
+  TM_ENV_FILE=/etc/turingmarket/turingmarket.env \
+  DB_PATH=/var/lib/turingmarket/db/turingmarket.db \
+  node server/scripts/provision_release_smoke_identity.js \
+    --database /var/lib/turingmarket/db/turingmarket.db \
+    --organization-id 1
+})"
+case "$RELEASE_SMOKE_PROVISION_OUTPUT" in
+  *'RELEASE_SMOKE_IDENTITY_READY existing'*|\
+  *'RELEASE_SMOKE_IDENTITY_READY repaired'*|\
+  *'RELEASE_SMOKE_IDENTITY_READY created'*) ;;
+  *)
+    echo "Unexpected release smoke identity provision result" >&2
+    exit 1
+    ;;
+esac
+printf '%s\n' "$RELEASE_SMOKE_PROVISION_OUTPUT"
+assert_protected_credentials_unchanged
 
 expect_loopback_status() {
   expected="$1"

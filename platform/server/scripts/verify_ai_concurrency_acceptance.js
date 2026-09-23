@@ -62,6 +62,16 @@ function resolveAcceptanceActor(db) {
     JOIN organizations organization ON organization.id=membership.org_id
     WHERE user.username=? AND user.role='admin' AND user.is_active=1
       AND membership.role_code='org_admin'
+      AND EXISTS (
+        SELECT 1
+        FROM team_memberships team_membership
+        JOIN teams team
+          ON team.org_id=team_membership.org_id
+         AND team.id=team_membership.team_id
+        WHERE team_membership.org_id=organization.id
+          AND team_membership.user_id=user.id
+          AND team_membership.status='active'
+      )
     ORDER BY user.id,organization.id
     LIMIT 1
   `).get(RELEASE_SMOKE_USERNAME);

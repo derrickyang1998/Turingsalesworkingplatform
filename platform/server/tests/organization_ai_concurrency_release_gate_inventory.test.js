@@ -85,12 +85,21 @@ test('every direct Tavily or DeepSeek production caller is explicitly concurrenc
 
 test('production cutover runs reversible AI concurrency acceptance before durable acceptance and public traffic', () => {
   const deploy = source('deploy_v8.ps1');
+  const trustedGate = source('server/scripts/trusted_production_source_gate.js');
+  const trustedManifest = JSON.parse(source('server/scripts/trusted_production_source_manifest.json'));
   const replay = deploy.indexOf('record_phase release-replay-complete');
+  const candidateHealth = deploy.lastIndexOf('restart_pm2_from_ecosystem_exactly');
+  const releaseSmokeProvision = deploy.indexOf('node server/scripts/provision_release_smoke_identity.js');
   const concurrencyAcceptance = deploy.indexOf('node server/scripts/verify_ai_concurrency_acceptance.js');
   const acceptanceFacts = deploy.indexOf('\nrecord_acceptance_facts\n', replay);
   const publicActivation = deploy.indexOf('\nactivate_public_candidate\n', acceptanceFacts);
   assert.ok(replay >= 0);
+  assert.ok(releaseSmokeProvision > candidateHealth);
   assert.ok(concurrencyAcceptance > replay);
+  assert.ok(releaseSmokeProvision < concurrencyAcceptance);
+  assert.match(deploy, /RELEASE_SMOKE_IDENTITY_READY existing/);
+  assert.match(deploy, /RELEASE_SMOKE_IDENTITY_READY repaired/);
+  assert.match(deploy, /RELEASE_SMOKE_IDENTITY_READY created/);
   assert.ok(acceptanceFacts > concurrencyAcceptance);
   assert.ok(publicActivation > acceptanceFacts);
   assert.match(deploy, /AI_CONCURRENCY_ACCEPTANCE_OK/);
@@ -99,6 +108,17 @@ test('production cutover runs reversible AI concurrency acceptance before durabl
     /NODE_ENV=production[\s\\]+TM_ENV_FILE=\/etc\/turingmarket\/turingmarket\.env[\s\\]+DB_PATH=\/var\/lib\/turingmarket\/db\/turingmarket\.db[\s\\]+node server\/scripts\/verify_ai_concurrency_acceptance\.js/
   );
   assert.match(deploy, /server\/tests\/verify_ai_concurrency_acceptance\.test\.js/);
+  assert.match(deploy, /server\\scripts\\provision_release_smoke_identity\.js/);
+  assert.match(deploy, /server\\tests\\release_smoke_identity\.test\.js/);
+  assert.match(deploy, /server\/tests\/release_smoke_identity\.test\.js/);
+  assert.match(trustedGate, /server\/scripts\/provision_release_smoke_identity\.js/);
+  assert.equal(
+    trustedManifest.entrypoints.releaseSmokeIdentityProvisioner,
+    'server/scripts/provision_release_smoke_identity.js'
+  );
+  assert.ok(trustedManifest.files.some(
+    (entry) => entry.path === 'server/scripts/provision_release_smoke_identity.js'
+  ));
   assert.match(deploy, /'aiConcurrencyAcceptance': aiConcurrencyAcceptance/);
   assert.match(deploy, /assert_ai_concurrency_acceptance_binding/);
 });

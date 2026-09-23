@@ -117,7 +117,7 @@ test('production cutover checks protected credentials after acceptance mutations
   const firstGuard = deploy.indexOf(guardCall);
   const acceptanceFacts = deploy.indexOf('\nrecord_acceptance_facts\n');
   const publicActivation = deploy.indexOf('\nactivate_public_candidate\n', acceptanceFacts);
-  const finalGuard = deploy.indexOf(guardCall, firstGuard + guardCall.length);
+  const finalGuard = deploy.lastIndexOf(guardCall);
   const finalFacts = deploy.indexOf('\nassert_final_acceptance_facts\n', publicActivation);
 
   assert.ok(verifierDefinition >= 0);

@@ -1,8 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const test = require('node:test');
 const Database = require('better-sqlite3');
+
+const RELEASE_SMOKE_TEAM_CODE = 'legacy-dept-' + crypto
+  .createHash('sha256')
+  .update(Buffer.from('platform_release', 'utf8'))
+  .digest('hex');
 
 function loadProvisioner() {
   try {
@@ -31,6 +37,17 @@ function fixture() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,revoked_at TEXT,
       PRIMARY KEY (org_id,user_id)
     );
+    CREATE TABLE teams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,org_id INTEGER NOT NULL,code TEXT NOT NULL,name TEXT NOT NULL,
+      UNIQUE (org_id,id),UNIQUE (org_id,code)
+    );
+    CREATE TABLE team_memberships (
+      org_id INTEGER NOT NULL,team_id INTEGER NOT NULL,user_id INTEGER NOT NULL,role_code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,revoked_at TEXT,
+      PRIMARY KEY (org_id,team_id,user_id),
+      FOREIGN KEY (org_id,team_id) REFERENCES teams (org_id,id),
+      FOREIGN KEY (org_id,user_id) REFERENCES organization_memberships (org_id,user_id)
+    );
     CREATE TABLE organization_member_policy (
       org_id INTEGER NOT NULL,user_id INTEGER NOT NULL,access_mode TEXT NOT NULL DEFAULT 'read_write',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -46,6 +63,9 @@ function fixture() {
     INSERT INTO organizations VALUES (10,'alpha','Alpha');
     INSERT INTO organization_memberships (org_id,user_id,role_code,status) VALUES (10,1,'org_admin','active');
     INSERT INTO organization_member_policy (org_id,user_id,access_mode) VALUES (10,1,'read_write');
+    INSERT INTO teams (id,org_id,code,name) VALUES (100,10,'management','Management');
+    INSERT INTO team_memberships (org_id,team_id,user_id,role_code,status)
+    VALUES (10,100,1,'team_lead','active');
     CREATE TRIGGER organization_membership_policy_insert
     AFTER INSERT ON organization_memberships
     BEGIN
@@ -85,6 +105,18 @@ test('provisions a dedicated non-login release smoke identity without changing p
       WHERE membership.org_id=10 AND membership.user_id=(SELECT id FROM users WHERE username='release-smoke')
     `).get();
     assert.deepEqual(membership, { role_code: 'org_admin', status: 'active', access_mode: 'read_write' });
+    const teamMembership = db.prepare(`
+      SELECT team.code,team.name,membership.role_code,membership.status
+      FROM team_memberships membership
+      JOIN teams team ON team.org_id=membership.org_id AND team.id=membership.team_id
+      WHERE membership.org_id=10 AND membership.user_id=(SELECT id FROM users WHERE username='release-smoke')
+    `).get();
+    assert.deepEqual(teamMembership, {
+      code: RELEASE_SMOKE_TEAM_CODE,
+      name: 'platform_release',
+      role_code: 'team_lead',
+      status: 'active'
+    });
     const audit = db.prepare("SELECT action,module,details FROM activity_log WHERE action='release_smoke_identity_provisioned'").get();
     assert.equal(audit.module, 'security');
     assert.equal(JSON.parse(audit.details).username, 'release-smoke');
@@ -117,6 +149,133 @@ test('reuses an exact release smoke identity without rotating its password hash'
       db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='release_smoke_identity_provisioned'").get().count,
       1
     );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM team_memberships WHERE user_id=(SELECT id FROM users WHERE username='release-smoke')").get().count,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('repairs only a missing standard team membership without rotating the smoke credential', () => {
+  const db = fixture();
+  try {
+    const { provisionReleaseSmokeIdentity } = loadProvisioner();
+    const inserted = db.prepare(`
+      INSERT INTO users (username,password_hash,display_name,role,department,api_quota,is_active)
+      VALUES ('release-smoke','preserved-smoke-hash','Release Smoke','admin','platform_release',0,1)
+    `).run();
+    db.prepare(`
+      INSERT INTO organization_memberships (org_id,user_id,role_code,status)
+      VALUES (10,?,'org_admin','active')
+    `).run(Number(inserted.lastInsertRowid));
+
+    const result = provisionReleaseSmokeIdentity(db, {
+      organizationId: 10,
+      createPasswordHash: () => {
+        throw new Error('repair path must not generate or rotate a credential');
+      }
+    });
+
+    assert.deepEqual(result, { status: 'repaired', username: 'release-smoke' });
+    assert.equal(
+      db.prepare("SELECT password_hash FROM users WHERE username='release-smoke'").get().password_hash,
+      'preserved-smoke-hash'
+    );
+    assert.deepEqual(db.prepare(`
+      SELECT team.code,team.name,membership.role_code,membership.status
+      FROM team_memberships membership
+      JOIN teams team ON team.org_id=membership.org_id AND team.id=membership.team_id
+      WHERE membership.user_id=?
+    `).get(Number(inserted.lastInsertRowid)), {
+      code: RELEASE_SMOKE_TEAM_CODE,
+      name: 'platform_release',
+      role_code: 'team_lead',
+      status: 'active'
+    });
+    const audit = db.prepare(`
+      SELECT details FROM activity_log
+      WHERE action='release_smoke_team_membership_repaired'
+    `).get();
+    assert.deepEqual(JSON.parse(audit.details), {
+      username: 'release-smoke',
+      organizationId: 10,
+      purpose: 'release_acceptance'
+    });
+    assert.doesNotMatch(audit.details, /password|hash|secret/i);
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when the smoke identity has any unexpected team membership', () => {
+  const db = fixture();
+  try {
+    const { provisionReleaseSmokeIdentity } = loadProvisioner();
+    const inserted = db.prepare(`
+      INSERT INTO users (username,password_hash,display_name,role,department,api_quota,is_active)
+      VALUES ('release-smoke','preserved-smoke-hash','Release Smoke','admin','platform_release',0,1)
+    `).run();
+    const userId = Number(inserted.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO organization_memberships (org_id,user_id,role_code,status)
+      VALUES (10,?,'org_admin','active')
+    `).run(userId);
+    db.prepare(`
+      INSERT INTO team_memberships (org_id,team_id,user_id,role_code,status)
+      VALUES (10,100,?,'team_lead','active')
+    `).run(userId);
+
+    assert.throws(
+      () => provisionReleaseSmokeIdentity(db, {
+        organizationId: 10,
+        createPasswordHash: () => '$2b$12$must-not-be-used'
+      }),
+      /RELEASE_SMOKE_IDENTITY_CONFLICT/
+    );
+    assert.equal(
+      db.prepare("SELECT password_hash FROM users WHERE username='release-smoke'").get().password_hash,
+      'preserved-smoke-hash'
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('rolls back a missing-team repair when its security audit cannot be written', () => {
+  const db = fixture();
+  try {
+    const { provisionReleaseSmokeIdentity } = loadProvisioner();
+    const inserted = db.prepare(`
+      INSERT INTO users (username,password_hash,display_name,role,department,api_quota,is_active)
+      VALUES ('release-smoke','preserved-smoke-hash','Release Smoke','admin','platform_release',0,1)
+    `).run();
+    const userId = Number(inserted.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO organization_memberships (org_id,user_id,role_code,status)
+      VALUES (10,?,'org_admin','active')
+    `).run(userId);
+    db.exec(`
+      CREATE TRIGGER reject_release_smoke_repair_audit
+      BEFORE INSERT ON activity_log
+      WHEN NEW.action='release_smoke_team_membership_repaired'
+      BEGIN
+        SELECT RAISE(ABORT,'repair audit unavailable');
+      END;
+    `);
+
+    assert.throws(
+      () => provisionReleaseSmokeIdentity(db, { organizationId: 10 }),
+      /repair audit unavailable/
+    );
+    assert.equal(
+      db.prepare("SELECT password_hash FROM users WHERE username='release-smoke'").get().password_hash,
+      'preserved-smoke-hash'
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM team_memberships WHERE user_id=?').get(userId).count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM teams WHERE code=?').get(RELEASE_SMOKE_TEAM_CODE).count, 0);
   } finally {
     db.close();
   }
@@ -163,6 +322,8 @@ test('rolls back every release smoke row when the membership policy trigger is u
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM users WHERE username='release-smoke'").get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM organization_memberships WHERE user_id<>1').get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM organization_member_policy WHERE user_id<>1').get().count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM team_memberships WHERE user_id<>1').get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM teams WHERE code=?").get(RELEASE_SMOKE_TEAM_CODE).count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 0);
   } finally {
     db.close();
