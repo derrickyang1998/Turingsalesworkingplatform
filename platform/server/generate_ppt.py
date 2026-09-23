@@ -15,7 +15,7 @@ from pptx.util import Inches, Pt
 
 SLIDE_W = 13.333
 SLIDE_H = 7.5
-FONT = "Microsoft YaHei"
+FONT = "Noto Sans SC"
 
 PURPLE = RGBColor(0x6D, 0x28, 0xD9)
 PURPLE_DARK = RGBColor(0x20, 0x16, 0x38)
@@ -28,6 +28,96 @@ WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 YELLOW = RGBColor(0xF4, 0xC9, 0x5D)
 GREEN = RGBColor(0x16, 0x9B, 0x62)
 RED = RGBColor(0xD9, 0x4A, 0x4A)
+
+
+def mojibake_score(value):
+    text = str(value or "")
+    controls = len(re.findall(r"[\x80-\x9f]", text)) * 3
+    markers = len(re.findall(r"(?:Ã.|Â.|â.|æ.|ç.|å.|ä.|è.|é.|ï¿½|锟斤拷|�)", text)) * 2
+    return controls + markers
+
+
+def repair_mojibake(value):
+    text = str(value if value is not None else "")
+
+    def decode_run(match):
+        run = match.group(0)
+        before = mojibake_score(run)
+        if before == 0:
+            return run
+        try:
+            decoded = run.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return run
+        if "�" in decoded or mojibake_score(decoded) >= before:
+            return run
+        return decoded
+
+    return re.sub(r"[\x80-\xff]{2,}", decode_run, text).replace("锟斤拷", "").replace("�", "")
+
+
+def client_safe_text(value):
+    text = repair_mojibake(value)
+    replacements = (
+        (r"\[(?:KB|WEB)-\d+\]", ""),
+        (r"\[(?:需求表(?:/客户资料)?|平台能力)\]", ""),
+        (r"AI outline was normalized(?: to the approved(?: 24-page)?(?: decision)? flow)?", ""),
+        (r"\bAI[-\s]+generated\s+(?=(?:draft|outline|content|proposal)\b)", ""),
+        (r"AI\s*生成(?:的)?\s*(?=方案|内容|文案|草稿|大纲)", ""),
+        (r"AI\s*草稿(?=\s*(?:[:：|｜/]|$))", "初稿"),
+        (r"AI\s*大纲(?=\s*(?:[:：|｜/]|$))", "方案结构"),
+        (r"AI\s*赋能(?=\s*全链路闭环)", "能力支持"),
+        (r"AI\s*赋能(?=\s*(?:[:：|｜/]|$))", "能力支持"),
+        (r"智能增长引擎", "增长执行体系"),
+        (r"全链路闭环", "完整执行流程"),
+        (r"颠覆增长", "增长改进"),
+        (r"人工确认方案", "确认方案"),
+        (r"P0\s*待确认", "启动前确认"),
+        (r"客户决策版", "项目方案"),
+        (r"Claims architecture", "内容表达边界"),
+        (r"Claims Matrix", "卖点证据表"),
+        (r"Product Fact Sheet", "产品事实清单"),
+        (r"Why TuringMarket", "图灵集市项目能力"),
+        (r"执行\s*Roadmap", "执行排期"),
+        (r"结构校验[｜|:]?[^\n；]*", ""),
+        (r"使用客户(?:提供的|正式)?产品主视觉[^。；]*[。；]?", "真实产品与核心使用场景。"),
+        (r"使用客户正式产品素材或与品类一致的概念场景示意[。；]?", "真实产品与核心使用场景。"),
+        (r"没有(?:正式|已授权)素材时[^。；]*[。；]?", ""),
+        (r"概念场景示意", "核心使用场景"),
+    )
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"^\s*[-–—|｜:：]+\s*|\s*[-–—|｜:：]+\s*$", "", text)
+    return text.strip()
+
+
+def presentation_product_name(value):
+    raw = re.sub(r"https?://\S+", "", client_safe_text(value), flags=re.IGNORECASE)
+    raw = re.sub(r"\s+", " ", raw).strip()
+    if not raw or len(raw) <= 54:
+        return raw or "核心产品"
+    model_codes = list(dict.fromkeys(re.findall(r"\b[A-Z]{1,6}-?\d[A-Z0-9-]{1,14}\b", raw)))[:3]
+    category = ""
+    for pattern, label in (
+        (r"hunting\s+blind", "Hunting Blind"),
+        (r"power\s+station", "Power Station"),
+        (r"smoke\s+alarm", "Smoke Alarm"),
+        (r"security\s+camera", "Security Camera"),
+        (r"exercise\s+bike", "Exercise Bike"),
+        (r"hunting\s+suit", "Hunting Suit"),
+        (r"wader", "Hunting Wader"),
+        (r"(?:打猎|狩猎)帐篷", "狩猎帐篷"),
+    ):
+        if re.search(pattern, raw, flags=re.IGNORECASE):
+            category = label
+            break
+    if model_codes and category:
+        return " / ".join(model_codes) + " " + category
+    if len(model_codes) > 1:
+        return " / ".join(model_codes)
+    first = re.split(r"[;；|｜\n]", raw)[0].strip() or raw
+    return first if len(first) <= 54 else first[:53] + "…"
 
 
 def clean(value, fallback=""):
@@ -87,29 +177,33 @@ def normalize_payload(source):
     source = source if isinstance(source, dict) else {}
     outline = source.get("outline") if isinstance(source.get("outline"), dict) else source
     demand = source.get("demand") if isinstance(source.get("demand"), dict) else {}
-    brand = clean(
+    brand = client_safe_text(clean(
         demand.get("brand") or demand.get("brand_name") or demand.get("company")
-        or demand.get("company_name") or outline.get("brand") or source.get("brand"), "CLIENT")
-    product = clean(demand.get("product") or demand.get("product_name")
-                    or outline.get("product"))
-    title = clean(outline.get("title") or source.get("title"),
-                  f"{brand} 海外红人营销方案")
-    subtitle = clean(outline.get("subtitle") or source.get("tagline"), "客户决策版")
-    narrative = clean(outline.get("narrative"),
-                      "从客户问题出发，形成可执行、可审核、可复盘的方案。")
+        or demand.get("company_name") or outline.get("brand") or source.get("brand"), "CLIENT"))
+    product_full_name = repair_mojibake(
+        demand.get("product") or demand.get("product_name")
+        or outline.get("product_full_name") or outline.get("product"))
+    product = presentation_product_name(product_full_name)
+    title = client_safe_text(clean(outline.get("title") or source.get("title"),
+                                   f"{brand} 海外红人营销方案"))
+    subtitle = client_safe_text(clean(outline.get("subtitle") or source.get("tagline"), "项目方案"))
+    narrative = client_safe_text(clean(outline.get("narrative"),
+                                       "从客户问题出发，形成可执行、可审核、可复盘的方案。"))
     raw_sections = outline.get("sections") if isinstance(outline.get("sections"), list) else []
     sections = []
     for item in raw_sections:
         if not isinstance(item, dict):
             continue
         section = {
-            "title": clean(item.get("title"), "方案页"),
+            "title": client_safe_text(clean(item.get("title"), "方案页")),
             "type": clean(item.get("type"), "content").lower(),
             "layout": clean(item.get("layout")).lower(),
-            "points": clean_list(item.get("points")) or clean_list(item.get("items")),
-            "note": clean(item.get("note")),
-            "kicker": clean(item.get("kicker")),
-            "visual_brief": clean(item.get("visual_brief")),
+            "points": [client_safe_text(point) for point in (
+                clean_list(item.get("points")) or clean_list(item.get("items")))
+                if client_safe_text(point)],
+            "note": client_safe_text(item.get("note")),
+            "kicker": client_safe_text(item.get("kicker")),
+            "visual_brief": client_safe_text(item.get("visual_brief")),
             "status": clean(item.get("status"), "inference").lower(),
             "evidence_labels": clean_list(item.get("evidence_labels"))[:6],
         }
@@ -120,11 +214,12 @@ def normalize_payload(source):
             "title": title, "type": "cover", "layout": "cover-image",
             "points": [subtitle], "note": "TuringMarket 图灵集市",
             "kicker": "", "visual_brief": "", "status": "confirmed",
-            "evidence_labels": ["[需求表/客户资料]"],
+            "evidence_labels": [],
         })
     return {
         "title": title, "subtitle": subtitle, "narrative": narrative,
-        "brand": brand, "product": product, "sections": sections,
+        "brand": brand, "product": product, "product_full_name": product_full_name,
+        "sections": sections,
     }
 
 
@@ -167,7 +262,7 @@ def add_text(slide, value, x, y, width, height, size=18, color=INK,
     if fit:
         frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     paragraph = frame.paragraphs[0]
-    paragraph.text = clean(value)
+    paragraph.text = client_safe_text(clean(value))
     paragraph.alignment = align
     paragraph.space_after = Pt(0)
     paragraph.line_spacing = 1.08
@@ -183,10 +278,6 @@ def title_size(value):
     return 25 if length > 34 else (29 if length > 24 else 34)
 
 
-def status_label(value):
-    return {"confirmed": "已确认", "pending": "待确认"}.get(value, "策略建议")
-
-
 def add_chrome(slide, section, index, total, dark=False):
     primary = WHITE if dark else BLACK
     secondary = WHITE if dark else MUTED
@@ -196,14 +287,8 @@ def add_chrome(slide, section, index, total, dark=False):
              1.0, 0.28, 9, secondary, True, PP_ALIGN.RIGHT)
     add_rule(slide, 0.6, 0.62, 12.1, primary)
     kicker = section["kicker"] or section["note"] or section["type"]
-    add_text(slide, kicker.upper(), 0.6, 0.77, 3.3, 0.24, 9,
+    add_text(slide, kicker, 0.6, 0.77, 4.1, 0.24, 9,
              YELLOW if dark else PURPLE, True)
-    status_color = GREEN if section["status"] == "confirmed" else secondary
-    add_text(slide, status_label(section["status"]), 3.55, 0.76,
-             1.1, 0.26, 9, status_color, True)
-    if section["evidence_labels"]:
-        add_text(slide, " / ".join(section["evidence_labels"]),
-                 4.75, 0.76, 4.9, 0.26, 8.5, secondary)
     add_text(slide, section["title"], 0.6, 1.11, 11.7, 0.58,
              title_size(section["title"]), primary, True)
 
@@ -393,14 +478,14 @@ def render_split(slide, deck, section, mode):
     side_width = 4.9 if side_dark else 5.1
     add_rect(slide, side_x, 1.95, side_width, 4.55,
              BLACK if side_dark else PURPLE_SOFT)
-    add_text(slide, "CONTENT CONCEPT" if side_dark else "SCENE DIRECTION",
+    add_text(slide, "内容创意主题" if side_dark else "核心使用场景",
              side_x + 0.35, 2.35, 3.4, 0.28, 9,
              YELLOW if side_dark else PURPLE, True)
     add_text(slide, deck["product"] or deck["brand"],
              side_x + 0.35, 3.65, side_width - 0.8,
              0.85, 27, WHITE if side_dark else BLACK, True)
     visual = section["visual_brief"] or (
-        "使用客户正式产品素材或与品类一致的概念场景示意。"
+        "围绕真实产品、目标受众和使用任务展开。"
         if side_dark else
         f"用真实场景说明 {deck['product'] or '产品'} 与目标用户任务的关系。")
     add_text(slide, visual, side_x + 0.35, 4.72,

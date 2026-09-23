@@ -619,7 +619,7 @@ test('Task 10 locked PPT bridge preserves the complete decision-deck workflow', 
       assert.match(fallbackHtml, /<!DOCTYPE html>/i);
       assert.match(fallbackHtml, /class="tm-deck-stage"/);
       assert.equal((fallbackHtml.match(/class="tm-deck-slide/g) || []).length, 24);
-      assert.match(fallbackHtml, /建议先建立产品理解与信任，再推动购买/);
+      assert.match(fallbackHtml, /用真实使用证明产品价值，再由内容承接购买决策/);
 
       const {
         download: fallbackPptxDownload,

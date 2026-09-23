@@ -277,7 +277,7 @@ test('proposal draft keeps the editable local proposal when the AI request fails
   });
   await operation;
 
-  assert.match(context.lastProp, /Acme 红人营销方案/);
+  assert.match(context.lastProp, /Acme 海外红人营销方案/);
   assert.match(context.elements.proposalOutput.innerHTML, /AI 服务暂不可用，已保留可编辑的基础方案/);
   assert.match(context.elements.proposalOutput.innerHTML, /textarea/);
   assert.equal(context.elements.btnGenerateProposal.disabled, false);
@@ -320,6 +320,9 @@ test('proposal route uses fixed private Campaign RAG without archiving an unconf
 
   assert.match(route, /const linkedRequest = hasCampaignId\(body\)/);
   assert.match(route, /campaign_id:\s*body\.campaign_id/);
+  assert.match(route, /pptKnowledgeScope\(\s*demand,\s*body\.campaign_id,\s*demandSourceId\s*\)/);
+  assert.match(route, /business_type:\s*proposalKnowledgeScope\s*&&\s*proposalKnowledgeScope\.business_type/);
+  assert.match(route, /business_id:\s*proposalKnowledgeScope\s*&&\s*proposalKnowledgeScope\.business_id/);
   assert.match(route, /idempotencyKey:\s*req\.get\('Idempotency-Key'\)/);
   assert.match(route, /requestId:\s*campaignLinkRequestId\(req\)/);
   assert.match(route, /knowledge_entry_ids:\s*body\.knowledge_entry_ids/);

@@ -109,6 +109,90 @@ test('rag service extracts Chinese business terms from long questions', () => {
   db.close();
 });
 
+test('rag source type allowlist excludes old generated decks from proposal context', () => {
+  const db = freshDb();
+  const knowledge = require('../services/knowledge_service');
+  const rag = require('../services/rag_service');
+  const base = {
+    content: 'TideWe hunting blind YouTube 美国 狩猎项目',
+    visibility: 'team',
+    created_by: 1
+  };
+  const demandEntry = knowledge.ingestKnowledge(db, {
+    ...base,
+    title: 'TideWe 需求表',
+    entry_type: 'demand',
+    source_type: 'demand_record',
+    source_id: 'tidewe-demand'
+  });
+  knowledge.ingestKnowledge(db, {
+    ...base,
+    title: 'Other brand old AI outline',
+    entry_type: 'ppt_outline',
+    source_type: 'ai_ppt_outline',
+    source_id: 'old-outline'
+  });
+
+  const context = rag.buildRagContext(db, {
+    query: 'TideWe hunting blind YouTube 美国 狩猎项目',
+    user: { id: 2, role: 'user' },
+    source_types: ['demand_record']
+  });
+
+  assert.deepEqual(context.references.map((reference) => reference.id), [demandEntry.id]);
+  assert.doesNotMatch(context.contextText, /Other brand old AI outline/);
+  db.close();
+});
+
+test('legacy AI chat forwards source type allowlists to RAG', async () => {
+  const db = freshDb();
+  const knowledge = require('../services/knowledge_service');
+  const ai = require('../services/ai_service');
+  const organizationId = db.prepare(
+    "SELECT id FROM organizations WHERE code='turingmarket-default'"
+  ).get().id;
+  const base = {
+    content: 'TideWe hunting blind source-filter-sentinel',
+    visibility: 'team',
+    created_by: 1,
+    organizationId
+  };
+  const demandEntry = knowledge.ingestKnowledge(db, {
+    ...base,
+    title: 'Current TideWe demand',
+    entry_type: 'demand',
+    source_type: 'demand_record',
+    source_id: 'current-demand'
+  });
+  knowledge.ingestKnowledge(db, {
+    ...base,
+    title: 'Unrelated generated outline',
+    entry_type: 'ppt_outline',
+    source_type: 'ai_ppt_outline',
+    source_id: 'unrelated-outline'
+  });
+
+  const response = await ai.handleChat(db, {
+    user: { id: 2, role: 'user' },
+    organizationId,
+    message: 'source-filter-sentinel',
+    source_types: ['demand_record'],
+    allowWeb: false,
+    archiveSummary: false,
+    provider: {
+      complete: async () => ({
+        content: 'filtered response',
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        model: 'fixture-model',
+        provider: 'fixture'
+      })
+    }
+  });
+
+  assert.deepEqual(response.knowledge_references.map((reference) => reference.id), [demandEntry.id]);
+  db.close();
+});
+
 test('private source hashes are scoped to the owner', () => {
   const db = freshDb();
   const knowledge = require('../services/knowledge_service');
@@ -435,7 +519,7 @@ test('ai service fails closed when a successful provider omits or contradicts to
   }
 });
 
-test('ppt outline generation retrieves knowledge and archives references', async () => {
+test('ppt outline generation retrieves only the current brand scope and archives references', async () => {
   const db = freshDb();
   const oldDeepSeek = process.env.DEEPSEEK_API_KEY;
   const oldTavily = process.env.TAVILY_API_KEY;
@@ -450,9 +534,23 @@ test('ppt outline generation retrieves knowledge and archives references', async
     const entry = knowledge.ingestKnowledge(db, {
       title: 'PPT internal case method',
       content: 'PPT generation should use the internal case library and confirmed proposal knowledge before web research.',
-      entry_type: 'proposal',
+      entry_type: 'brand_profile',
+      source_type: 'brand_profile',
       visibility: 'team',
       tags: ['ppt', 'proposal', 'case'],
+      business_type: 'brand',
+      business_id: 'Aurora',
+      created_by: 1
+    });
+    knowledge.ingestKnowledge(db, {
+      title: 'Another client with the same search terms',
+      content: 'PPT generation should use the internal case library and confirmed proposal knowledge before web research.',
+      entry_type: 'brand_profile',
+      source_type: 'brand_profile',
+      visibility: 'team',
+      tags: ['ppt', 'proposal', 'case'],
+      business_type: 'brand',
+      business_id: 'Borealis',
       created_by: 1
     });
 

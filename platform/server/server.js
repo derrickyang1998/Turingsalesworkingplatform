@@ -3089,6 +3089,11 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
       template,
       auditContext: demandAudit
     });
+    const proposalKnowledgeScope = latestUiCompat.pptKnowledgeScope(
+      demand,
+      body.campaign_id,
+      demandSourceId
+    );
     const result = await aiService.handleChat(db, {
       user: req.user,
       organizationId: req.authContext.organization.id,
@@ -3101,11 +3106,14 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
       requestId: campaignLinkRequestId(req),
       ipAddress: req.ip,
       knowledge_entry_ids: body.knowledge_entry_ids,
+      source_types: latestUiCompat.PPT_RAG_SOURCE_TYPES.slice(),
+      business_type: proposalKnowledgeScope && proposalKnowledgeScope.business_type,
+      business_id: proposalKnowledgeScope && proposalKnowledgeScope.business_id,
       visibility: 'private',
       knowledgeLimit: 8,
       archiveSummary: false,
       atomicOneShot: true,
-      max_tokens: 5200
+      max_tokens: 6800
     });
     if (!linkedRequest) {
       demandEntry = knowledgeService.ingestBusinessArtifact(db, {

@@ -320,6 +320,19 @@ test('linked PPT outline uses private Campaign RAG and returns auditable referen
   assert.equal(captured.options.atomicOneShot, true);
   assert.equal(captured.options.knowledgeLimit, 8);
   assert.deepEqual(captured.options.knowledge_entry_ids, [7]);
+  assert.deepEqual(captured.options.source_types, [
+    'demand_record',
+    'proposal_record',
+    'campaign_demand',
+    'campaign_proposal',
+    'brand_profile',
+    'crm_customer',
+    'crm_opportunity',
+    'obsidian',
+    'manual'
+  ]);
+  assert.equal(captured.options.business_type, 'campaign');
+  assert.equal(captured.options.business_id, '12');
   assert.equal(captured.options.idempotencyKey, 'ppt-outline-test-key');
   assert.equal(captured.options.requestId, 'ppt-outline-test-request');
   assert.match(captured.options.message, /需求分析对话 #101/);

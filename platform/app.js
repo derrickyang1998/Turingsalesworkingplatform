@@ -3486,7 +3486,8 @@ function buildProposalDemandContent(demand) {
     '预算: ' + (demand.budget || ''),
     '行业: ' + (demand.category || demand.industry || ''),
     '竞品: ' + (demand.competitors || ''),
-    '补充要求: ' + (demand.notes || '')
+    '补充要求: ' + (demand.notes || ''),
+    '需求表原文: ' + String(demand.source_text || '').slice(0, 12000)
   ].join('\n');
 }
 function buildProposalDraftRequestOptions(demand, template, requestContext) {
@@ -3548,27 +3549,51 @@ function buildLocalProposalDraft(demand, template, similarCases) {
   template = template || { name: '方案模板', sections: [] };
   similarCases = Array.isArray(similarCases) ? similarCases : [];
   var nl = '\n';
-  var content = '# ' + (demand.brand || '品牌') + ' 红人营销方案' + nl + nl
+  var brand = demand.brand || '品牌';
+  var product = demand.product || '核心产品';
+  var market = demand.area || demand.market || '目标市场';
+  var platform = demand.platform || demand.platforms || '待确认平台';
+  var budget = demand.budget || '待确认预算';
+  var sellingPoint = demand.usp || demand.notes || '以客户确认的产品事实为准';
+  var content = '# ' + brand + ' 海外红人营销方案' + nl + nl
     + '**TuringMarket 图灵集市**' + nl + nl
-    + '## 客户需求' + nl
-    + '- 品牌: ' + (demand.brand || '') + nl
-    + '- 公司: ' + (demand.company || '') + nl
-    + '- 产品: ' + (demand.product || '') + nl
-    + '- 卖点: ' + (demand.usp || demand.notes || '') + nl
-    + '- 平台: ' + (demand.platform || '') + nl
-    + '- 市场: ' + (demand.area || '') + nl
-    + '- 预算: ' + (demand.budget || '') + nl
-    + '- 行业: ' + (demand.category || demand.industry || '') + nl + nl
-    + '## 模板: ' + (template.name || '方案模板') + nl;
-  (Array.isArray(template.sections) ? template.sections : []).forEach(function(section, index) {
-    content += (index + 1) + '. ' + section + nl;
-  });
+    + '## 执行建议' + nl
+    + '- 以目标用户的真实使用任务为内容起点，用可见的产品演示建立信任，再由' + platform + '内容承接购买决策。' + nl
+    + '- 首轮先验证卖点表达、达人匹配与内容钩子，表现稳定后再扩大合作规模。' + nl + nl
+    + '## 项目目标与成功标准' + nl
+    + '- 品牌与产品：' + brand + ' / ' + product + nl
+    + '- 目标市场与平台：' + market + ' / ' + platform + nl
+    + '- 项目预算：' + budget + nl
+    + '- 核心卖点与要求：' + sellingPoint + nl + nl
+    + '## 启动前确认事项' + nl
+    + '- 产品功能、参数、认证、禁用表达与使用边界。' + nl
+    + '- 价格、库存、样品数量、购买链接、折扣机制与审核负责人。' + nl + nl
+    + '## 推荐策略路径' + nl
+    + '- 受众：优先选择真正使用该品类、能清楚讲解并稳定产出内容的创作者。' + nl
+    + '- 内容：每条内容只解决一个明确问题，并用操作过程、场景细节或同口径对比提供证据。' + nl
+    + '- 转化：统一标题、描述区、购买链接、折扣码、评论区问答与合作披露。' + nl + nl
+    + '## 达人组合与筛选' + nl
+    + '- 受众与市场匹配 25%；同形式内容表现 25%；讲解与演示能力 20%；评论质量 15%；商务与档期 15%。' + nl
+    + '- 假量、受众错位、竞品冲突、危险演示或无法履约为淘汰项。' + nl + nl
+    + '## 内容与执行节奏' + nl
+    + '- 启动：确认产品事实清单、项目目标和审核口径。' + nl
+    + '- 筛选：形成达人长名单、报价口径、风险核验与替补名单。' + nl
+    + '- 制作：寄样、脚本、拍摄、修改与发布确认并行推进。' + nl
+    + '- 复盘：上线后24小时、7天与30天回收数据、评论与素材资产。' + nl + nl
+    + '## 衡量与沉淀' + nl
+    + '- 按项目目标统一曝光、互动、点击、转化、CPM、CPC与内容授权口径。' + nl
+    + '- 沉淀达人表现、报价、脚本、钩子、FAQ、授权素材与复盘结论。' + nl + nl
+    + '## 下一步' + nl
+    + '- 完成产品事实、样品与购买链路确认后，进入达人建联、首轮报价与排期。' + nl;
+  if (Array.isArray(template.sections) && template.sections.length) {
+    content += nl + '## 客户指定汇报模块' + nl;
+    template.sections.forEach(function(section) { content += '- ' + section + nl; });
+  }
   if (similarCases.length) {
-    content += nl + '## 可复用历史案例' + nl;
+    content += nl + '## 可复用项目经验' + nl;
     similarCases.forEach(function(entry, index) {
-      content += (index + 1) + '. 案例 #' + entry.id + '（' + entry.entry_type + '，匹配 '
-        + Number(entry.similarity_score || 0).toFixed(1) + '）: '
-        + String(entry.content || '').replace(/\s+/g, ' ').slice(0, 260) + nl;
+      content += (index + 1) + '. ' + String(entry.title || entry.content || '')
+        .replace(/\s+/g, ' ').slice(0, 260) + nl;
     });
   }
   return content;
@@ -16007,11 +16032,75 @@ function switchPage(id, options) {
       .replace(/'/g, '&#39;');
   }
 
+  function repairDeckMojibake(value) {
+    var text = String(value === undefined || value === null ? '' : value);
+    if (typeof TextDecoder === 'undefined') return text.replace(/锟斤拷|�/g, '');
+    var decoder;
+    try { decoder = new TextDecoder('utf-8', { fatal: true }); } catch (_error) { return text; }
+    return text.replace(/[\u0080-\u00ff]{2,}/g, function(run) {
+      try {
+        var bytes = new Uint8Array(Array.prototype.map.call(run, function(character) {
+          return character.charCodeAt(0) & 255;
+        }));
+        return decoder.decode(bytes);
+      } catch (_error) {
+        return run;
+      }
+    }).replace(/锟斤拷|�/g, '');
+  }
+
+  function clientSafeDeckText(value) {
+    return repairDeckMojibake(value)
+      .replace(/\[(?:KB|WEB)-\d+\]/gi, '')
+      .replace(/\[(?:需求表(?:\/客户资料)?|平台能力)\]/g, '')
+      .replace(/AI outline was normalized(?: to the approved(?: 24-page)?(?: decision)? flow)?/gi, '')
+      .replace(/\bAI[-\s]+generated\s+(?=(?:draft|outline|content|proposal)\b)/gi, '')
+      .replace(/AI\s*生成(?:的)?\s*(?=方案|内容|文案|草稿|大纲)/gi, '')
+      .replace(/AI\s*草稿(?=\s*(?:[:：|｜/]|$))/gi, '初稿')
+      .replace(/AI\s*大纲(?=\s*(?:[:：|｜/]|$))/gi, '方案结构')
+      .replace(/AI\s*赋能(?=\s*全链路闭环)/gi, '能力支持')
+      .replace(/AI\s*赋能(?=\s*(?:[:：|｜/]|$))/gi, '能力支持')
+      .replace(/智能增长引擎/g, '增长执行体系')
+      .replace(/全链路闭环/g, '完整执行流程')
+      .replace(/颠覆增长/g, '增长改进')
+      .replace(/人工确认方案/g, '确认方案')
+      .replace(/P0\s*待确认/g, '启动前确认')
+      .replace(/客户决策版/g, '项目方案')
+      .replace(/Claims architecture/gi, '内容表达边界')
+      .replace(/Product Fact Sheet/gi, '产品事实清单')
+      .replace(/Why TuringMarket/gi, '图灵集市项目能力')
+      .replace(/执行\s*Roadmap/gi, '执行排期')
+      .replace(/结构校验[｜|:]?[^\n；]*/g, '')
+      .replace(/使用客户(?:提供的|正式)?产品主视觉[^。；]*[。；]?/g, '真实产品与核心使用场景。')
+      .replace(/使用客户正式产品素材或与品类一致的概念场景示意[。；]?/g, '真实产品与核心使用场景。')
+      .replace(/没有(?:正式|已授权)素材时[^。；]*[。；]?/g, '')
+      .replace(/概念场景示意/g, '核心使用场景')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/^\s*[-–—|｜:：]+\s*|\s*[-–—|｜:：]+\s*$/g, '')
+      .trim();
+  }
+
+  function presentationDeckProductName(value) {
+    var raw = clientSafeDeckText(value).replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
+    if (!raw || Array.from(raw).length <= 54) return raw;
+    var modelCodes = Array.from(new Set(raw.match(/\b[A-Z]{1,6}-?\d[A-Z0-9-]{1,14}\b/g) || [])).slice(0, 3);
+    var category = /hunting\s+blind/i.test(raw) ? 'Hunting Blind'
+      : (/power\s+station/i.test(raw) ? 'Power Station'
+        : (/smoke\s+alarm/i.test(raw) ? 'Smoke Alarm'
+          : (/security\s+camera/i.test(raw) ? 'Security Camera'
+            : (/(?:打猎|狩猎)帐篷/.test(raw) ? '狩猎帐篷' : ''))));
+    if (modelCodes.length && category) return modelCodes.join(' / ') + ' ' + category;
+    if (modelCodes.length > 1) return modelCodes.join(' / ');
+    var first = raw.split(/[;；|｜\n]/)[0].trim();
+    var chars = Array.from(first || raw);
+    return chars.length <= 54 ? chars.join('') : chars.slice(0, 53).join('') + '…';
+  }
+
   function normalizePoints(value) {
     if (Array.isArray(value)) {
-      return value.map(function(item) { return String(item || '').trim(); }).filter(Boolean).slice(0, 8);
+      return value.map(clientSafeDeckText).filter(Boolean).slice(0, 8);
     }
-    return String(value || '').split(/[;；\n]+/).map(function(item) { return item.trim(); }).filter(Boolean).slice(0, 8);
+    return String(value || '').split(/[;；\n]+/).map(clientSafeDeckText).filter(Boolean).slice(0, 8);
   }
 
   function splitDeckPoint(value) {
@@ -16068,9 +16157,10 @@ function switchPage(id, options) {
   function normalizeDeck(data, demand) {
     data = data && typeof data === 'object' ? data : {};
     demand = demand && typeof demand === 'object' ? demand : {};
-    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || data.brand || '';
-    var product = demand.product || demand.product_name || data.product || '';
-    var title = String(data.title || [brand, product, '海外红人营销方案'].filter(Boolean).join(' ') || '海外红人营销方案').trim();
+    var brand = clientSafeDeckText(demand.brand || demand.brand_name || demand.company || demand.company_name || data.brand || '');
+    var productFullName = demand.product || demand.product_name || data.product_full_name || data.product || '';
+    var product = presentationDeckProductName(productFullName);
+    var title = clientSafeDeckText(data.title || [brand, product, '海外红人营销方案'].filter(Boolean).join(' ') || '海外红人营销方案');
     var sections = Array.isArray(data.sections) ? data.sections.map(function(section) {
       section = section && typeof section === 'object' ? section : {};
       var evidenceLabels = Array.isArray(section.evidence_labels) ? section.evidence_labels.map(function(label) { return String(label).trim(); }).filter(Boolean).slice(0, 6) : [];
@@ -16078,13 +16168,13 @@ function switchPage(id, options) {
       if (status === 'confirmed' && !evidenceLabels.length) status = 'pending';
       return {
         slot_key: String(section.slot_key || '').trim(),
-        title: String(section.title || '方案页').trim(),
+        title: clientSafeDeckText(section.title || '方案页'),
         type: String(section.type || 'content').trim(),
         layout: normalizeLayout(section),
         points: normalizePoints(section.points),
-        note: String(section.note || '').trim(),
-        kicker: String(section.kicker || '').trim(),
-        visual_brief: String(section.visual_brief || '').trim(),
+        note: clientSafeDeckText(section.note || ''),
+        kicker: clientSafeDeckText(section.kicker || ''),
+        visual_brief: clientSafeDeckText(section.visual_brief || ''),
         evidence_labels: evidenceLabels,
         status: status
       };
@@ -16095,20 +16185,21 @@ function switchPage(id, options) {
         title: title,
         type: 'cover',
         layout: 'cover-image',
-        points: [String(data.subtitle || '客户决策版')],
+        points: [clientSafeDeckText(data.subtitle || '项目方案')],
         note: 'TuringMarket 图灵集市',
         kicker: '',
         visual_brief: '',
-        evidence_labels: ['[需求表/客户资料]'],
+        evidence_labels: [],
         status: 'confirmed'
       });
     }
     return {
       title: title,
-      subtitle: String(data.subtitle || '客户决策版').trim(),
-      narrative: String(data.narrative || '').trim(),
+      subtitle: clientSafeDeckText(data.subtitle || '项目方案'),
+      narrative: clientSafeDeckText(data.narrative || ''),
       brand: brand || String(title).split(/\s+/)[0] || 'CLIENT',
       product: product,
+      product_full_name: repairDeckMojibake(productFullName),
       sections: sections
     };
   }
@@ -16129,45 +16220,73 @@ function switchPage(id, options) {
 
   function buildLocalDecisionDeckFallback(demand, proposal, reason) {
     demand = demand && typeof demand === 'object' ? demand : {};
-    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || '客户品牌';
-    var product = demand.product || demand.product_name || '核心产品';
-    var market = demand.target_market || demand.market || demand.area || '目标市场';
-    var budget = demand.budget || demand.budget_range || '待确认';
+    var brand = clientSafeDeckText(demand.brand || demand.brand_name || demand.company || demand.company_name || '客户品牌');
+    var productFullName = repairDeckMojibake(demand.product || demand.product_name || '核心产品');
+    var product = presentationDeckProductName(productFullName);
+    var market = clientSafeDeckText(demand.target_market || demand.market || demand.area || '目标市场');
+    var budget = clientSafeDeckText(demand.budget || demand.budget_range || '待确认');
     var platforms = [].concat(demand.platforms || demand.platform || ['YouTube', 'Instagram', 'TikTok']).filter(Boolean).join(' / ');
     var competitors = [].concat(demand.competitors || demand.competitor || []).filter(Boolean).join(' / ') || '待客户确认';
-    var proposalBrief = String(proposal || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+    var proposalBrief = clientSafeDeckText(String(proposal || '').replace(/[#*_`]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 260));
+    var notes = clientSafeDeckText(demand.notes || demand.usp || '');
+    var sourceText = repairDeckMojibake(demand.source_text || demand.sourceText || demand.raw_text || '');
+    var factText = [sourceText, notes].filter(Boolean).join('\n');
+    var sellingPoints = [];
+    var sellingExpression = /(?:关键卖点|卖点)\s*\d+\s*[:：]\s*([^\r\n]*?)(?=\s*(?:(?:关键卖点|卖点)\s*\d+\s*[:：])|\r?\n|$)/gi;
+    var sellingMatch;
+    while ((sellingMatch = sellingExpression.exec(factText)) !== null) {
+      var sellingPoint = clientSafeDeckText(sellingMatch[1]).replace(/[；;，,\s]+$/g, '').trim();
+      if (sellingPoint && sellingPoints.indexOf(sellingPoint) < 0) sellingPoints.push(sellingPoint);
+    }
+    if (!sellingPoints.length && demand.usp) {
+      sellingPoints = String(demand.usp).split(/[；;\n]+/).map(clientSafeDeckText).filter(Boolean).slice(0, 5);
+    }
+    var sellingSummary = sellingPoints.join('、') || '操作过程、场景细节和真实反馈';
+    var huntingCampaign = /hunt|deer|bowhunting|狩猎|打猎|猎人|blind/i.test([productFullName, demand.category, factText].join(' '));
+    var primaryScene = huntingCampaign ? '真实猎场与林地环境' : '目标用户真实使用场景';
+    var audienceMatch = factText.match(/受众定位\s*(?:\||[:：])\s*([^；\n]+)/);
+    var launchMatch = factText.match(/(?:预期视频发布日期范围|视频发布时间)\s*(?:\||[:：])\s*([^；\n]+)/);
+    var audience = audienceMatch ? audienceMatch[1] : '与产品真实使用任务高度相关的人群';
+    var launchWindow = launchMatch ? launchMatch[1] : '以客户库存与上线节奏为准';
+    var contentSystemPoints = sellingPoints.length
+      ? sellingPoints.slice(0, 4).map(function(point, index) { return '卖点 ' + (index + 1) + '|' + point; })
+      : ['问题解释|为什么值得关注', '真实场景|何时、何地、谁会使用', '正确使用|展示流程和边界'];
+    contentSystemPoints.push('购买承接|价格、渠道和 CTA 以正式信息为准');
     var s = localDeckSection;
     var deck = {
       title: brand + ' ' + product + ' 海外红人营销方案',
-      subtitle: market + ' 客户决策版 / ' + budget,
-      narrative: '先建立产品理解与信任，再推动购买。',
+      subtitle: market + ' / ' + platforms + ' / ' + budget,
+      narrative: huntingCampaign
+        ? '以真实猎场任务证明产品差异，让内容直接服务购买决策。'
+        : '以真实使用任务证明产品价值，让内容直接服务购买决策。',
       brand: brand,
       product: product,
+      product_full_name: productFullName,
       warning: reason || '',
       sections: [
-        s(brand + ' ' + product + ' 海外红人营销方案', 'cover', 'cover-image', [market, platforms, '预算口径|' + budget], reason || '客户汇报版', 'confirmed', '使用客户正式产品主视觉或与品类一致的概念场景示意。'),
-        s('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再由高表现内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'].concat(proposalBrief ? ['人工确认方案|' + proposalBrief] : []), '执行建议'),
+        s(brand + ' ' + product + ' 海外红人营销方案', 'cover', 'cover-image', [market, platforms, '项目预算|' + budget], '海外红人营销项目', 'confirmed', primaryScene + '中的产品价值与使用任务。'),
+        s(huntingCampaign ? '用真实猎场验证产品差异，再由内容承接购买决策' : '用真实使用证明产品价值，再由内容承接购买决策', 'recommendation', 'recommendation', ['核心判断|' + (huntingCampaign ? '以真实猎场任务证明产品差异，让内容直接服务购买决策' : ('围绕目标用户任务解释' + product + '的购买理由')), '内容任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'].concat(proposalBrief ? ['方案依据|' + proposalBrief] : []), '执行建议'),
         s('先锁定产品事实，再锁定脚本卖点', 'brief', 'brief-register', ['品牌|' + brand, '产品|' + product, '市场|' + market, '预算|' + budget, 'P0待确认|SKU、功能与认证、价格库存、样品、购买链路、审核负责人'], '需求与信息边界', 'pending'),
-        s('本次项目要同时解决四个客户问题', 'challenge', 'four-challenges', ['品牌认知|目标受众为什么要关注', '产品理解|用一句话说清产品解决的问题', '内容可信|让演示和证据代替口号', '执行确定性|提前锁定样品、审核、档期和替补'], '项目挑战'),
+        s('本次项目要同时解决四个客户问题', 'challenge', 'four-challenges', ['时机窗口|' + launchWindow, '产品理解|' + sellingSummary, '内容可信|让演示和证据代替口号', '执行确定性|提前锁定样品、审核、档期和替补'], '项目挑战'),
         s('推广窗口由客户节奏与真实市场信号共同决定', 'market', 'evidence-table', ['客户时间表|以正式上市和库存时间为准', '市场信号|接口失败时不编造联网资料', '执行建议|先完成事实表和达人池，再确定上线节奏'], '市场窗口', 'pending'),
-        s('竞品已占据认知位置，方案需要明确差异来源', 'comparison', 'comparison-table', ['竞品范围|' + competitors, '可比较项|受众、使用任务、内容证明、购买链路', '不可借用项|竞品功能、认证与参数不能写成客户产品能力'], '竞争格局', 'pending'),
-        s(brand + '需要先争取一个清楚、可证明的位置', 'positioning', 'positioning', ['客户问题|目标用户为什么现在需要' + product, '品牌角色|用已确认事实给出清楚答案', '内容证据|真实场景、操作过程和使用反馈', '转化承接|购买链接、优惠机制和评论区问答'], '定位建议'),
-        s('先找有真实使用任务的人，再看粉丝规模', 'audience', 'audience-scene', ['核心受众|与' + product + '使用场景高度相关的人群', '专家型创作者|负责原理、边界与可信解释', '场景型创作者|负责真实使用任务和生活表达', '评测型创作者|负责对比、搜索沉淀与购买决策'], '受众与使用场景', 'inference', '使用目标市场中的真实家庭、工作或生活场景。'),
-        s('一次内容完成从问题到行动的完整解释', 'sequence', 'sequence', ['01 真实问题|从用户会遇到的任务或风险开始', '02 产品价值|解释产品解决什么问题', '03 使用演示|按确认资料展示操作与边界', '04 结果证据|呈现体验、对比或状态变化', '05 行动入口|给出清楚 CTA 与购买链路'], '传播主线'),
+        s('竞品比较只服务于定位，不替代客户产品事实', 'comparison', 'comparison-table', ['竞品范围|' + competitors, '可比较项|受众、使用任务、内容证明、购买链路', '不可借用项|竞品功能、认证与参数不能写成客户产品能力'], '竞争格局', 'pending'),
+        s(brand + '需要先争取一个清楚、可证明的位置', 'positioning', 'positioning', ['核心主张|' + (huntingCampaign ? '看得更广、藏得更稳、收得更快' : (sellingPoints[0] || ('用真实任务证明' + product + '价值'))), '证明方式|' + primaryScene + '、操作过程和使用反馈', '适用人群|' + audience, '转化承接|购买链接、优惠机制和评论区问答'], '定位建议'),
+        s('先匹配真实使用者，再评估粉丝规模', 'audience', 'audience-scene', ['核心受众|' + audience, '专家型创作者|负责原理、边界与可信解释', '场景型创作者|负责真实使用任务和自然表达', '评测型创作者|负责对比、搜索沉淀与购买决策'], '受众与使用场景', 'inference', primaryScene + '中的产品任务。'),
+        s('一次内容完成从问题到行动的完整解释', 'sequence', 'sequence', ['01 真实问题|从用户会遇到的任务或风险开始', '02 产品价值|' + (sellingPoints[0] || '解释产品解决什么问题'), '03 使用演示|按确认资料展示操作与边界', '04 结果证据|呈现体验、对比或状态变化', '05 行动入口|给出清楚 CTA 与购买链路'], '传播主线'),
         s('内容先分清可说、待确认和禁止三条边界', 'boundaries', 'boundary-columns', ['可说|客户书面确认的功能、认证、价格与渠道', '待确认|尚未发布的参数、服务承诺和上市信息', '禁止|竞品参数移植、危险测试、保证性效果承诺'], 'Claims architecture', 'pending'),
         s('每个平台承担不同的说服任务', 'platform', 'platform-roles', ['YouTube|深度解释、搜索沉淀和购买前决策', 'Instagram|视觉化场景、生活方式和多触点复访', 'TikTok|快速测试钩子和单一问题短内容', '本次平台范围|' + platforms], '平台分工'),
         s('按说服任务配人，不按粉丝量堆人', 'creator_mix', 'creator-mix', ['权威解释型|解决可信度与专业问题', '场景体验型|把产品放进真实任务', '评测搜索型|承接竞品和购买前搜索', '短视频测试型|快速验证钩子与表达'], '达人组合'),
         s('100分模型选人，风险项一票否决', 'scoring', 'scorecard', ['受众与市场匹配|25', '近10条同形式内容表现|25', '内容解释与演示能力|20', '评论质量与商业内容折损|15', '报价、授权和档期可执行性|15', '一票否决|假量、受众错位、竞品冲突、危险表达'], '筛选标准'),
-        s('内容系统覆盖理解、使用与购买', 'content_system', 'content-system', ['问题解释|为什么值得关注', '真实场景|何时、何地、谁会使用', '正确使用|展示流程和边界', '对比判断|只比较可核实的差异', '家庭或团队响应|说明使用后的行动', '购买承接|价格、渠道和 CTA 以正式信息为准'], '内容母题'),
-        s('首批创意从一次真实使用任务开始', 'creative', 'creative-split', ['创意母题|把产品放进目标受众本来就会做的任务', '开场钩子|先提出具体问题，不先念品牌卖点', '内容证据|操作过程、场景细节和真实反馈', 'CTA|引导查看正式产品信息或购买页面'], '创意方向 01', 'inference', '使用一张能看到人物、环境和产品任务关系的真实场景图。'),
+        s('内容系统覆盖理解、使用与购买', 'content_system', 'content-system', contentSystemPoints, '内容母题'),
+        s(huntingCampaign ? '首批创意从一次真实猎场任务开始' : '首批创意从一次真实使用任务开始', 'creative', 'creative-split', ['创意母题|' + (huntingCampaign ? '一次真实猎场布置与等待任务' : '把产品放进目标受众本来就会做的任务'), '开场钩子|' + (huntingCampaign ? '猎物进入视野前，猎人如何同时看清环境并保持隐蔽' : '先提出具体问题，不先念品牌卖点'), '内容证据|' + sellingSummary, '行动入口|说明适用场景并引导查看正式产品页面'], '创意方向 01', 'inference', primaryScene + '中的实测任务。'),
         s('第二组创意负责高意向搜索与对比', 'creative', 'creative-split', ['搜索问题|围绕用户购买前最常问的问题', '比较边界|只使用已确认、同口径信息', '达人角色|选择能讲清原理和使用差异的人', '资产价值|沉淀 FAQ、评论语料和可复用片段'], '创意方向 02'),
-        s('长视频负责把产品和购买理由讲清楚', 'format', 'format-storyboard', ['0-15秒|真实问题与观看理由', '15-90秒|场景、用户和产品任务', '核心段落|操作演示、边界与证据', '结尾|结论、适用人群、CTA和披露'], 'YouTube / 长视频格式'),
+        s('长视频负责把产品和购买理由讲清楚', 'format', 'format-storyboard', ['0-15秒|真实问题与观看理由', '15-90秒|' + primaryScene + '、目标用户和产品任务', '核心证明|' + sellingSummary, '结尾|结论、适用人群、CTA和披露'], 'YouTube / 长视频格式'),
         s('短视频每条只解决一个问题', 'format', 'format-storyboard', ['0-3秒|一个具体问题或反常识画面', '3-12秒|展示场景和产品动作', '12-30秒|解释结果或关键差异', '结尾|一句结论、CTA和合作披露'], 'Reels / TikTok / Shorts'),
         s('高风险品类先过事实、演示与披露', 'compliance', 'dark-guardrail', ['Claims Matrix|每项卖点对应客户证据和可用表达', '说明书校验|安装、使用与限制必须与正式资料一致', '危险测试|禁止自行制造风险或不安全演示', 'FTC披露|口头、画面和描述区按要求披露合作关系', '授权与合同|明确修改、保留、剪辑、白名单和地域'], '内容审核与安全红线', 'pending'),
-        s('排期并行推进，关键门槛前不进入下一阶段', 'timeline', 'timeline', ['启动|第1周|Product Fact Sheet、目标与审核口径确认|项目启动表', '筛选|第1-2周|达人池、报价与风险核验|推荐名单', '制作|第2-4周|寄样、脚本、拍摄与修改|脚本和样片', '上线|第4-6周|发布、监测与评论承接|上线链接和周报', '复盘|D+7 / D+30|数据回收与下一轮建议|复盘报告'], '执行 Roadmap'),
+        s('排期并行推进，关键门槛前不进入下一阶段', 'timeline', 'timeline', ['启动|第1周|产品事实清单、目标与审核口径确认|项目启动表', '筛选|第1-2周|达人池、报价与风险核验|推荐名单', '制作|第2-4周|寄样、脚本、拍摄与修改|脚本和样片', '上线|' + launchWindow + '|发布、监测与评论承接|上线链接和周报', '复盘|上线后7天与30天|数据回收与下一轮建议|复盘报告'], '执行排期'),
         s('一次项目留下达人、内容与数据三类资产', 'measurement', 'asset-pillars', ['达人资产|报价、受众、履约和历史表现', '内容资产|钩子、脚本、授权素材和 FAQ', '数据资产|曝光、互动、点击、转化和成本口径', '复盘节奏|24小时、7天、30天按项目目标回收'], '数据与资产沉淀'),
         s('项目制承担主计划，单采只做可比测试', 'commercial', 'comparison-table', ['项目制|策略、达人组合、议价、审核、替补、归因和复盘', '单采|指定达人、单一交付物和明确边界', '同口径比较|统一达人条件、交付物、授权周期和税费口径', '预算|' + budget + '，具体拆分待报价和客户确认'], '商务模式', 'pending'),
-        s('图灵的价值体现在执行证据与响应机制', 'capability', 'capability-proof', ['需求转译|把产品资料转成达人筛选、脚本和审核标准', '项目执行|名单、合同、寄样、内容审核和上线盯控', '数据复盘|统一回收链接、指标、评论和素材资产', '团队资料|只使用客户可核验的公司、团队与案例信息'], 'Why TuringMarket', 'confirmed'),
+        s('图灵的价值体现在执行证据与响应机制', 'capability', 'capability-proof', ['需求转译|把产品资料转成达人筛选、脚本和审核标准', '项目执行|名单、合同、寄样、内容审核和上线盯控', '数据复盘|统一回收链接、指标、评论和素材资产', '响应机制|关键节点明确负责人、反馈时限与替补方案'], 'Why TuringMarket', 'confirmed'),
         s('收到关键资料即可启动建联与排期', 'next', 'next-steps', ['Product Fact Sheet|功能、认证、安装和禁用表达', '量产与样品|数量、时间、寄送区域和库存', '价格与购买链路|零售价、套装、渠道、链接和优惠', '审核节奏|品牌负责人、法务/合规、反馈时限', '启动动作|确认后进入达人长名单与首轮报价'], '下一步', 'pending')
       ],
       context_excerpt: proposalBrief
@@ -16183,6 +16302,14 @@ function switchPage(id, options) {
     deck.sections[0].evidence_labels = ['[需求表]'];
     deck.sections[2].evidence_labels = ['[需求表]'];
     deck.sections[22].evidence_labels = ['[平台能力]'];
+    deck.sections = deck.sections.map(function(section) {
+      section.title = clientSafeDeckText(section.title);
+      section.points = normalizePoints(section.points);
+      section.note = clientSafeDeckText(section.note);
+      section.kicker = clientSafeDeckText(section.kicker);
+      section.visual_brief = clientSafeDeckText(section.visual_brief);
+      return section;
+    });
     return deck;
   }
 
@@ -16230,13 +16357,9 @@ function switchPage(id, options) {
   }
 
   function renderDeckChrome(deck, section, index, total) {
-    var evidence = section.evidence_labels.length
-      ? '<span class="tm-evidence">' + section.evidence_labels.map(htmlEscape).join(' / ') + '</span>'
-      : '';
     return '<header class="tm-slide-header"><div class="tm-brand" aria-label="TuringMarket 图灵集市">TuringMarket 图灵集市</div><div class="tm-page">'
       + String(index + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0') + '</div></header>'
-      + '<div class="tm-section-meta"><span>' + htmlEscape(section.kicker || section.note || section.type) + '</span>'
-      + '<span class="tm-status tm-status-' + htmlEscape(section.status) + '">' + deckStatusLabel(section.status) + '</span>' + evidence + '</div>';
+      + '<div class="tm-section-meta"><span>' + htmlEscape(section.kicker || section.note || section.type) + '</span></div>';
   }
 
   function renderDeckFooter(deck) {
@@ -16307,7 +16430,7 @@ function switchPage(id, options) {
     return '<div class="tm-audience"><div class="tm-audience-list">' + section.points.slice(0, 5).map(function(point) {
       var pair = splitDeckPoint(point);
       return '<div><strong>' + htmlEscape(pair.label) + '</strong><span>' + htmlEscape(pair.body) + '</span></div>';
-    }).join('') + '</div><aside class="tm-visual-direction"><span>SCENE DIRECTION</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
+    }).join('') + '</div><aside class="tm-visual-direction"><span>核心使用场景</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
       + htmlEscape(visual) + '</p></aside></div>';
   }
 
@@ -16343,8 +16466,8 @@ function switchPage(id, options) {
 
   function renderCreative(section, deck) {
     var points = section.points.slice(0, 5);
-    return '<div class="tm-creative"><aside><span>CONTENT CONCEPT</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
-      + htmlEscape(section.visual_brief || '使用客户正式产品素材或与品类一致的概念场景示意。') + '</p></aside><div>'
+    return '<div class="tm-creative"><aside><span>内容创意主题</span><strong>' + htmlEscape(deck.product || deck.brand) + '</strong><p>'
+      + htmlEscape(section.visual_brief || '围绕真实产品、目标受众和使用任务展开。') + '</p></aside><div>'
       + points.map(function(point) { var pair = splitDeckPoint(point); return '<article><strong>' + htmlEscape(pair.label) + '</strong><p>' + htmlEscape(pair.body) + '</p></article>'; }).join('')
       + '</div></div>';
   }
@@ -16399,12 +16522,12 @@ function switchPage(id, options) {
 
   function decisionDeckCSS() {
     return [
-      ':root{--tm-purple:#6d28d9;--tm-purple-soft:#f2edff;--tm-black:#111318;--tm-yellow:#f4c95d;--tm-green:#169b62;--tm-red:#d94a4a;--tm-ink:#171923;--tm-muted:#667085;--tm-line:#d9dde7;--tm-paper:#ffffff;--tm-bg:#eef1f6;--tm-font:Inter,"Aptos","Microsoft YaHei","PingFang SC",sans-serif}',
+      ':root{--tm-purple:#5426a9;--tm-purple-soft:#f2edff;--tm-black:#111318;--tm-yellow:#f4cf36;--tm-green:#169b62;--tm-red:#d94a4a;--tm-ink:#171923;--tm-muted:#667085;--tm-line:#d9dde7;--tm-paper:#ffffff;--tm-bg:#eef1f6;--tm-font:"Noto Sans SC","Microsoft YaHei","PingFang SC","Aptos",sans-serif}',
       '*{box-sizing:border-box;letter-spacing:0}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--tm-bg);font-family:var(--tm-font);color:var(--tm-ink)}',
       '.tm-deck-viewport{position:fixed;inset:0;overflow:hidden}.tm-deck-stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:var(--tm-paper);overflow:hidden;box-shadow:0 24px 70px rgba(17,19,24,.18)}',
       '.tm-deck-slide{position:absolute;inset:0;width:1920px;height:1080px;padding:64px 86px 58px;background:#fff;opacity:0;visibility:hidden;transform:translateX(36px);transition:opacity .28s ease,transform .28s ease;overflow:hidden}.tm-deck-slide.active{opacity:1;visibility:visible;transform:translateX(0)}',
       '.tm-slide-header{height:42px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--tm-black);padding-bottom:14px}.tm-brand{font-size:19px;font-weight:900;color:var(--tm-purple)}.tm-brand span{font-size:16px;color:var(--tm-black);font-weight:800;margin-left:10px}.tm-page{font-size:15px;font-weight:800;color:var(--tm-muted)}',
-      '.tm-section-meta{height:42px;display:flex;align-items:center;gap:14px;margin-top:18px;font-size:14px;font-weight:800;color:var(--tm-purple);text-transform:uppercase}.tm-status,.tm-evidence{display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid var(--tm-line);border-radius:6px;color:var(--tm-muted);background:#fff;text-transform:none}.tm-status-confirmed{color:var(--tm-green);border-color:#a9dcc6}.tm-status-pending{color:#9b6a00;border-color:#ead28f;background:#fff9e8}',
+      '.tm-section-meta{height:42px;display:flex;align-items:center;margin-top:18px;font-size:14px;font-weight:800;color:var(--tm-purple)}',
       '.tm-slide-title{font-size:48px;line-height:1.12;font-weight:900;margin:4px 0 34px;max-width:1500px}.tm-title-long{font-size:42px}.tm-title-compact{font-size:36px}.tm-slide-footer{position:absolute;left:86px;right:86px;bottom:28px;height:22px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--tm-line);padding-top:14px;font-size:12px;color:#8a91a3}',
       '.tm-cover{padding:0;background:#fff;display:grid;grid-template-columns:47% 53%}.tm-cover.active{display:grid}.tm-cover-copy{padding:92px 80px 70px;background:var(--tm-black);color:#fff;display:flex;flex-direction:column;justify-content:center}.tm-cover-label{font-size:16px;font-weight:850;color:var(--tm-yellow);margin-bottom:34px}.tm-cover-title{font-size:64px;line-height:1.08;font-weight:950;margin:0 0 30px;max-width:720px}.tm-cover-title.tm-title-long{font-size:54px}.tm-cover-title.tm-title-compact{font-size:46px}.tm-cover-sub{font-size:22px;color:#d5d8e1;margin:0 0 48px}.tm-cover-facts{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #444854}.tm-cover-facts div{min-height:78px;padding:16px 14px 10px 0;border-bottom:1px solid #444854}.tm-cover-facts strong{display:block;font-size:19px}.tm-cover-facts span{display:block;font-size:14px;color:#aeb4c2;margin-top:5px}.tm-cover-stage{position:relative;padding:100px 86px;background:var(--tm-purple-soft);display:flex;flex-direction:column;justify-content:center}.tm-cover-client{font-size:24px;color:var(--tm-purple);font-weight:900}.tm-cover-product{font-size:72px;line-height:1.02;font-weight:950;color:var(--tm-black);margin:30px 0;max-width:780px}.tm-cover-thesis{font-size:24px;line-height:1.55;color:#4d5262;max-width:700px;border-left:8px solid var(--tm-yellow);padding-left:24px}.tm-cover-mark{position:absolute;right:70px;bottom:46px;font-size:150px;font-weight:950;color:#dcd2f8}',
       '.tm-recommendation-lead{font-size:35px;line-height:1.4;font-weight:850;color:var(--tm-purple);max-width:1500px;margin-bottom:42px;padding-left:24px;border-left:8px solid var(--tm-yellow)}',
@@ -16419,7 +16542,7 @@ function switchPage(id, options) {
       '.tm-role-rows{border-top:2px solid var(--tm-black)}.tm-role-row{display:grid;grid-template-columns:70px 300px 1fr;min-height:86px;align-items:center;border-bottom:1px solid var(--tm-line)}.tm-role-row>span{font-size:15px;font-weight:900;color:var(--tm-purple)}.tm-role-row strong{font-size:22px}.tm-role-row p{font-size:18px;line-height:1.45;color:var(--tm-muted);margin:0}',
       '.tm-scorecard{display:grid;gap:18px}.tm-score-row{display:grid;grid-template-columns:300px 1fr 320px;gap:24px;align-items:center}.tm-score-row strong{font-size:19px}.tm-score-row>div{height:14px;background:#eceef3;border-radius:6px;overflow:hidden}.tm-score-row i{display:block;height:100%;background:var(--tm-purple);border-radius:6px}.tm-score-row span{font-size:16px;color:var(--tm-muted)}',
       '.tm-creative>aside{background:var(--tm-black);color:#fff}.tm-creative>aside>span{color:var(--tm-yellow)}.tm-creative>aside strong{color:#fff}.tm-creative>aside p{color:#cfd3dd}.tm-creative>div{padding:10px 0 0 42px}.tm-creative article{display:grid;grid-template-columns:190px 1fr;gap:20px;padding:22px 0;border-bottom:1px solid var(--tm-line)}.tm-creative article strong{font-size:20px}.tm-creative article p{font-size:18px;line-height:1.5;color:var(--tm-muted);margin:0}',
-      '.tm-storyboard{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.tm-storyboard article{min-height:420px;padding:28px 22px;border:1px solid var(--tm-line);border-top:7px solid var(--tm-purple);border-radius:6px}.tm-storyboard article:first-child{background:var(--tm-black);color:#fff;border-color:var(--tm-black);border-top-color:var(--tm-yellow)}.tm-storyboard span{font-size:13px;font-weight:900;color:var(--tm-purple)}.tm-storyboard article:first-child span{color:var(--tm-yellow)}.tm-storyboard strong{display:block;font-size:21px;margin:90px 0 16px}.tm-storyboard p{font-size:16px;line-height:1.5;color:var(--tm-muted)}.tm-storyboard article:first-child p{color:#cfd3dd}',
+      '.tm-storyboard{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.tm-storyboard article{min-height:420px;padding:28px 22px;border:1px solid var(--tm-line);border-top:7px solid var(--tm-purple);border-radius:6px}.tm-storyboard article:first-child{background:var(--tm-black);color:#fff;border-color:var(--tm-black);border-top-color:var(--tm-yellow)}.tm-storyboard span{font-size:13px;font-weight:900;color:var(--tm-purple)}.tm-storyboard article:first-child span{color:var(--tm-yellow)}.tm-storyboard strong{display:block;font-size:21px;margin:90px 0 16px}.tm-storyboard p{font-size:16px;line-height:1.5;color:var(--tm-muted)}.tm-storyboard article:first-child p{color:#cfd3dd}',
       '.tm-layout-dark-guardrail,.tm-layout-capability-proof{background:var(--tm-black);color:#fff}.tm-layout-capability-proof{background:#201638}.tm-layout-dark-guardrail .tm-slide-header,.tm-layout-capability-proof .tm-slide-header{border-color:#fff}.tm-layout-dark-guardrail .tm-brand span,.tm-layout-capability-proof .tm-brand span,.tm-layout-dark-guardrail .tm-page,.tm-layout-capability-proof .tm-page{color:#fff}.tm-layout-dark-guardrail .tm-slide-footer,.tm-layout-capability-proof .tm-slide-footer{border-color:#545762;color:#b8bdca}.tm-layout-dark-guardrail .tm-item,.tm-layout-capability-proof .tm-item{border-color:#545762}.tm-layout-dark-guardrail .tm-item h3,.tm-layout-capability-proof .tm-item h3{color:#fff}.tm-layout-dark-guardrail .tm-item p,.tm-layout-capability-proof .tm-item p{color:#c8ccd6}.tm-layout-dark-guardrail .tm-item-index{color:var(--tm-yellow)}',
       '.tm-timeline{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-top:2px solid var(--tm-black);padding-top:40px}.tm-timeline article{position:relative;min-height:390px;padding:60px 26px 20px;border-right:1px solid var(--tm-line)}.tm-timeline article:last-child{border-right:0}.tm-timeline-dot{position:absolute;top:-16px;left:26px;width:34px;height:34px;border-radius:50%;background:var(--tm-purple);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:900}.tm-timeline strong{display:block;font-size:22px}.tm-timeline span{display:block;color:var(--tm-purple);font-size:16px;font-weight:800;margin:8px 0 28px}.tm-timeline p{font-size:17px;line-height:1.5;color:var(--tm-muted)}.tm-timeline small{display:block;margin-top:24px;font-size:14px;color:var(--tm-black);font-weight:800}',
       '.tm-next-steps{border-top:2px solid var(--tm-black)}.tm-next-steps>div{display:grid;grid-template-columns:80px 310px 1fr;min-height:88px;align-items:center;border-bottom:1px solid var(--tm-line)}.tm-next-steps span{font-size:18px;font-weight:950;color:var(--tm-purple)}.tm-next-steps strong{font-size:21px}.tm-next-steps p{font-size:18px;color:var(--tm-muted);margin:0}',

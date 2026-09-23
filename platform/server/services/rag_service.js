@@ -232,6 +232,7 @@ function buildRagContext(db, opts) {
     limit: limit,
     entry_type: opts.entry_type,
     source_type: opts.source_type,
+    source_types: opts.source_types,
     visibility: opts.visibility,
     business_type: opts.business_type,
     business_id: opts.business_id,

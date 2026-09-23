@@ -380,7 +380,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "caa8770be12d05cc8432d9b5f6231780e01c03864994d94e6850c2c5afa024aa"
+      "sha256": "470230e4be79c6297bd8620ebdca0073c7401bdb7ba8179ac016fa24001db1ec"
     },
     {
       "path": "server/workflow_engine.js",
@@ -408,7 +408,7 @@
     },
     {
       "path": "server/services/ai_service.js",
-      "sha256": "9f1e4719f59203c8cd2341575d040239d6dc7ef54b286d4acd157064e6b6df1d"
+      "sha256": "993eafd92af5e5b848832466b6ef7b26c990a7056c2c27d6b90723f222937699"
     },
     {
       "path": "server/services/business_knowledge_service.js",
@@ -508,7 +508,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "9eda8b2dc1b0f8d3aa3c80a3ad96e95fe47c12147439ac1877b75d8e6b2128e2"
+      "sha256": "c1f9204e23340385521822f003bc54cc1e29564125c6e7a45295385defe73d01"
     },
     {
       "path": "server/services/llm_service.js",
@@ -608,7 +608,7 @@
     },
     {
       "path": "server/services/rag_service.js",
-      "sha256": "e1773aaf1e9ef5551fcfe2059499f457227013d0d727aeeb575e2a541e03b829"
+      "sha256": "5cd175475dc30afb54e9ca659f5b64525b14a471c7c2bd8a58acb539136fd93a"
     },
     {
       "path": "server/services/sqlite_digest_service.js",

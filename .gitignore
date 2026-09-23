@@ -15,6 +15,8 @@ rotation-payload*.private.json
 id_rsa*
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
 _*.js
 .superpowers/
 platform/playwright-report/
