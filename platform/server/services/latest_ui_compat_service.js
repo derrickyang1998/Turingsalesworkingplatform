@@ -363,7 +363,7 @@ function buildPptOutlinePrompt(input) {
   const auditContext = Array.isArray(input.auditContext) ? input.auditContext.filter(Boolean) : [];
   return [
     '为 TuringMarket 生成客户决策型海外红人营销演示大纲。HTMLPPT 与 PPTX 将共用这份结构化数据。',
-    '只返回 JSON，不要 Markdown 代码块或解释。顶层字段：title, subtitle, narrative, sections。',
+    '只返回 JSON，不要 Markdown 代码块或解释。顶层字段：title, subtitle, narrative, brand, product, sections。brand 与 product 必须沿用需求表原文。',
     'sections 必须为 18-24 页且包含封面。约80%页面回答客户的产品、市场、策略、内容、执行和衡量问题，约20%页面用于图灵能力证明，并把公司能力放在后段。',
     '每页字段：title, type, layout, points, note, kicker, visual_brief, evidence_labels, status。points 为 2-6 条短句；evidence_labels 为 [KB-n] 或公开来源标签数组；status 只能是 confirmed、inference、pending。',
     '建议顺序：cover；recommendation；brief；challenge；market；comparison；positioning；audience；sequence；boundaries；platform；creator_mix；scoring；content_system；creative（1-2页）；format（长视频与短视频）；compliance；timeline；measurement；commercial；capability；next。可以按资料删减，但不得跳过 recommendation、brief、boundaries、compliance、measurement、capability、next。',
@@ -435,6 +435,8 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
     title: brand + ' ' + product + ' 海外红人营销方案',
     subtitle: market + '客户决策版 / ' + budget,
     narrative: '先建立产品理解与信任，再推动购买。',
+    brand,
+    product,
     sections,
     research
   };
@@ -620,6 +622,8 @@ function normalizePptOutline(value, fallback, research) {
   out.title = out.title || (fallback && fallback.title) || '海外红人营销方案';
   out.subtitle = out.subtitle || (fallback && fallback.subtitle) || '';
   out.narrative = out.narrative || (fallback && fallback.narrative) || '';
+  out.brand = out.brand || (fallback && fallback.brand) || '';
+  out.product = out.product || (fallback && fallback.product) || '';
   out.sections = Array.isArray(out.sections) ? out.sections : (fallback && fallback.sections) || [];
   out.sections = out.sections.map(function(sec, index) {
     return {

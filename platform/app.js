@@ -15986,8 +15986,8 @@ function switchPage(id, options) {
   function normalizeDeck(data, demand) {
     data = data && typeof data === 'object' ? data : {};
     demand = demand && typeof demand === 'object' ? demand : {};
-    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || '';
-    var product = demand.product || demand.product_name || '';
+    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || data.brand || '';
+    var product = demand.product || demand.product_name || data.product || '';
     var title = String(data.title || [brand, product, '海外红人营销方案'].filter(Boolean).join(' ') || '海外红人营销方案').trim();
     var sections = Array.isArray(data.sections) ? data.sections.map(function(section) {
       section = section && typeof section === 'object' ? section : {};
@@ -16026,11 +16026,74 @@ function switchPage(id, options) {
     };
   }
 
+  function localDeckSection(title, type, layout, points, note, status, visualBrief) {
+    return {
+      title: title,
+      type: type,
+      layout: layout,
+      points: points,
+      note: note || '',
+      kicker: '',
+      visual_brief: visualBrief || '',
+      evidence_labels: [],
+      status: status || 'inference'
+    };
+  }
+
+  function buildLocalDecisionDeckFallback(demand, proposal, reason) {
+    demand = demand && typeof demand === 'object' ? demand : {};
+    var brand = demand.brand || demand.brand_name || demand.company || demand.company_name || '客户品牌';
+    var product = demand.product || demand.product_name || '核心产品';
+    var market = demand.target_market || demand.market || demand.area || '目标市场';
+    var budget = demand.budget || demand.budget_range || '待确认';
+    var platforms = [].concat(demand.platforms || demand.platform || ['YouTube', 'Instagram', 'TikTok']).filter(Boolean).join(' / ');
+    var competitors = [].concat(demand.competitors || demand.competitor || []).filter(Boolean).join(' / ') || '待客户确认';
+    var proposalBrief = String(proposal || demand.usp || product).replace(/\s+/g, ' ').trim().slice(0, 180);
+    var s = localDeckSection;
+    return {
+      title: brand + ' ' + product + ' 海外红人营销方案',
+      subtitle: market + '客户决策版 / ' + budget,
+      narrative: '先建立产品理解与信任，再推动购买。',
+      brand: brand,
+      product: product,
+      warning: reason || '',
+      sections: [
+        s(brand + ' ' + product + ' 海外红人营销方案', 'cover', 'cover-image', [market, platforms, '预算口径|' + budget], reason || '客户汇报版', 'confirmed', '使用客户正式产品主视觉或与品类一致的概念场景示意。'),
+        s('建议先建立产品理解与信任，再推动购买', 'recommendation', 'recommendation', ['战略判断|围绕真实使用任务解释产品价值，再由高表现内容承接转化', '达人任务|用可信演示回答购买前问题', '项目任务|把内容、数据和授权素材沉淀为下一轮资产'], '执行建议'),
+        s('先锁定产品事实，再锁定脚本卖点', 'brief', 'brief-register', ['品牌|' + brand, '产品|' + product, '市场|' + market, '预算|' + budget, 'P0待确认|SKU、功能与认证、价格库存、样品、购买链路、审核负责人'], '需求与信息边界', 'pending'),
+        s('本次项目要同时解决四个客户问题', 'challenge', 'four-challenges', ['品牌认知|目标受众为什么要关注', '产品理解|用一句话说清产品解决的问题', '内容可信|让演示和证据代替口号', '执行确定性|提前锁定样品、审核、档期和替补'], '项目挑战'),
+        s('推广窗口由客户节奏与真实市场信号共同决定', 'market', 'evidence-table', ['客户时间表|以正式上市和库存时间为准', '市场信号|接口失败时不编造联网资料', '执行建议|先完成事实表和达人池，再确定上线节奏'], '市场窗口', 'pending'),
+        s('竞品已占据认知位置，方案需要明确差异来源', 'comparison', 'comparison-table', ['竞品范围|' + competitors, '可比较项|受众、使用任务、内容证明、购买链路', '不可借用项|竞品功能、认证与参数不能写成客户产品能力'], '竞争格局', 'pending'),
+        s(brand + '需要先争取一个清楚、可证明的位置', 'positioning', 'positioning', ['客户问题|目标用户为什么现在需要' + product, '品牌角色|用已确认事实给出清楚答案', '内容证据|真实场景、操作过程和使用反馈', '转化承接|购买链接、优惠机制和评论区问答'], '定位建议'),
+        s('先找有真实使用任务的人，再看粉丝规模', 'audience', 'audience-scene', ['核心受众|与' + product + '使用场景高度相关的人群', '专家型创作者|负责原理、边界与可信解释', '场景型创作者|负责真实使用任务和生活表达', '评测型创作者|负责对比、搜索沉淀与购买决策'], '受众与使用场景', 'inference', '使用目标市场中的真实家庭、工作或生活场景。'),
+        s('一次内容完成从问题到行动的完整解释', 'sequence', 'sequence', ['01 真实问题|从用户会遇到的任务或风险开始', '02 产品价值|解释产品解决什么问题', '03 使用演示|按确认资料展示操作与边界', '04 结果证据|呈现体验、对比或状态变化', '05 行动入口|给出清楚 CTA 与购买链路'], '传播主线'),
+        s('内容先分清可说、待确认和禁止三条边界', 'boundaries', 'boundary-columns', ['可说|客户书面确认的功能、认证、价格与渠道', '待确认|尚未发布的参数、服务承诺和上市信息', '禁止|竞品参数移植、危险测试、保证性效果承诺'], 'Claims architecture', 'pending'),
+        s('每个平台承担不同的说服任务', 'platform', 'platform-roles', ['YouTube|深度解释、搜索沉淀和购买前决策', 'Instagram|视觉化场景、生活方式和多触点复访', 'TikTok|快速测试钩子和单一问题短内容', '本次平台范围|' + platforms], '平台分工'),
+        s('按说服任务配人，不按粉丝量堆人', 'creator_mix', 'creator-mix', ['权威解释型|解决可信度与专业问题', '场景体验型|把产品放进真实任务', '评测搜索型|承接竞品和购买前搜索', '短视频测试型|快速验证钩子与表达'], '达人组合'),
+        s('100分模型选人，风险项一票否决', 'scoring', 'scorecard', ['受众与市场匹配|25', '近10条同形式内容表现|25', '内容解释与演示能力|20', '评论质量与商业内容折损|15', '报价、授权和档期可执行性|15', '一票否决|假量、受众错位、竞品冲突、危险表达'], '筛选标准'),
+        s('内容系统覆盖理解、使用与购买', 'content_system', 'content-system', ['问题解释|为什么值得关注', '真实场景|何时、何地、谁会使用', '正确使用|展示流程和边界', '对比判断|只比较可核实的差异', '家庭或团队响应|说明使用后的行动', '购买承接|价格、渠道和 CTA 以正式信息为准'], '内容母题'),
+        s('首批创意从一次真实使用任务开始', 'creative', 'creative-split', ['创意母题|把产品放进目标受众本来就会做的任务', '开场钩子|先提出具体问题，不先念品牌卖点', '内容证据|操作过程、场景细节和真实反馈', 'CTA|引导查看正式产品信息或购买页面'], '创意方向 01', 'inference', '使用一张能看到人物、环境和产品任务关系的真实场景图。'),
+        s('第二组创意负责高意向搜索与对比', 'creative', 'creative-split', ['搜索问题|围绕用户购买前最常问的问题', '比较边界|只使用已确认、同口径信息', '达人角色|选择能讲清原理和使用差异的人', '资产价值|沉淀 FAQ、评论语料和可复用片段'], '创意方向 02'),
+        s('长视频负责把产品和购买理由讲清楚', 'format', 'format-storyboard', ['0-15秒|真实问题与观看理由', '15-90秒|场景、用户和产品任务', '核心段落|操作演示、边界与证据', '结尾|结论、适用人群、CTA和披露'], 'YouTube / 长视频格式'),
+        s('短视频每条只解决一个问题', 'format', 'format-storyboard', ['0-3秒|一个具体问题或反常识画面', '3-12秒|展示场景和产品动作', '12-30秒|解释结果或关键差异', '结尾|一句结论、CTA和合作披露'], 'Reels / TikTok / Shorts'),
+        s('高风险品类先过事实、演示与披露', 'compliance', 'dark-guardrail', ['Claims Matrix|每项卖点对应客户证据和可用表达', '说明书校验|安装、使用与限制必须与正式资料一致', '危险测试|禁止自行制造风险或不安全演示', 'FTC披露|口头、画面和描述区按要求披露合作关系', '授权与合同|明确修改、保留、剪辑、白名单和地域'], '内容审核与安全红线', 'pending'),
+        s('排期并行推进，关键门槛前不进入下一阶段', 'timeline', 'timeline', ['启动|第1周|Product Fact Sheet、目标与审核口径确认|项目启动表', '筛选|第1-2周|达人池、报价与风险核验|推荐名单', '制作|第2-4周|寄样、脚本、拍摄与修改|脚本和样片', '上线|第4-6周|发布、监测与评论承接|上线链接和周报', '复盘|D+7 / D+30|数据回收与下一轮建议|复盘报告'], '执行 Roadmap'),
+        s('一次项目留下达人、内容与数据三类资产', 'measurement', 'asset-pillars', ['达人资产|报价、受众、履约和历史表现', '内容资产|钩子、脚本、授权素材和 FAQ', '数据资产|曝光、互动、点击、转化和成本口径', '复盘节奏|24小时、7天、30天按项目目标回收'], '数据与资产沉淀'),
+        s('项目制承担主计划，单采只做可比测试', 'commercial', 'comparison-table', ['项目制|策略、达人组合、议价、审核、替补、归因和复盘', '单采|指定达人、单一交付物和明确边界', '同口径比较|统一达人条件、交付物、授权周期和税费口径', '预算|' + budget + '，具体拆分待报价和客户确认'], '商务模式', 'pending'),
+        s('图灵的价值体现在执行证据与响应机制', 'capability', 'capability-proof', ['需求转译|把产品资料转成达人筛选、脚本和审核标准', '项目执行|名单、合同、寄样、内容审核和上线盯控', '数据复盘|统一回收链接、指标、评论和素材资产', '团队资料|只使用客户可核验的公司、团队与案例信息'], 'Why TuringMarket', 'confirmed'),
+        s('收到关键资料即可启动建联与排期', 'next', 'next-steps', ['Product Fact Sheet|功能、认证、安装和禁用表达', '量产与样品|数量、时间、寄送区域和库存', '价格与购买链路|零售价、套装、渠道、链接和优惠', '审核节奏|品牌负责人、法务/合规、反馈时限', '启动动作|确认后进入达人长名单与首轮报价'], '下一步', 'pending')
+      ],
+      context_excerpt: proposalBrief
+    };
+  }
+
   function enrichLegacyOutline(normalized, source) {
     normalized = normalized && typeof normalized === 'object' ? normalized : {};
     source = source && typeof source === 'object' ? source : {};
     var sourceSections = Array.isArray(source.sections) ? source.sections : [];
     normalized.narrative = source.narrative || normalized.narrative || '';
+    normalized.brand = source.brand || normalized.brand || '';
+    normalized.product = source.product || normalized.product || '';
     normalized.sections = (normalized.sections || []).map(function(section, index) {
       var rich = sourceSections.find(function(candidate) {
         return candidate && String(candidate.title || '').trim() === String(section.title || '').trim();
@@ -16294,12 +16357,14 @@ function switchPage(id, options) {
     global.buildRevealHTML = function(data) {
       return buildDecisionDeckHTML(data, global.curDemand || {});
     };
+    global.buildClientPPTFallback = buildLocalDecisionDeckFallback;
     global.__tmDecisionDeckV2Installed = true;
   }
 
   global.TMDecisionDeckRenderer = Object.freeze({
     build: buildDecisionDeckHTML,
     normalize: normalizeDeck,
+    fallback: buildLocalDecisionDeckFallback,
     install: install
   });
 

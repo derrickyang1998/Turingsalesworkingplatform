@@ -370,7 +370,7 @@ function assertNoUnhandledActivity(page, state, expectedConsoleErrors) {
   assert.deepEqual(state.pageErrors, [], 'all created pages must remain error-free');
 }
 
-test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow', { timeout: 120_000 }, async () => {
+test('Task 10 locked PPT bridge preserves the complete decision-deck workflow', { timeout: 120_000 }, async () => {
   let server;
   let browser;
   const previousFixturePort = process.env.TM_BROWSER_FIXTURE_PORT;
@@ -485,6 +485,9 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
       assert.match(html, /Task 10 Added Contract Slide/);
       assert.doesNotMatch(html, /Task 10 Added Contract Slide 副本/);
       assert.match(html, /<!DOCTYPE html>/i);
+      assert.match(html, /class="tm-deck-stage"/);
+      assert.match(html, /class="tm-deck-slide/);
+      assert.doesNotMatch(html, /scroll-snap-type:y/);
 
       const {
         download: pptxDownload,
@@ -539,12 +542,12 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
         const output = document.getElementById('proposalOutput');
         return output &&
           output.textContent.includes('Task 10 forced outline failure') &&
-          output.querySelector('button[onclick="downloadHTMLPPT()"]') &&
-          output.querySelector('button[onclick="downloadPPTX()"]');
+          output.querySelector('button[data-tm-ppt-action="downloadHTMLPPT"]') &&
+          output.querySelector('button[data-tm-ppt-action="downloadPPTX"]');
       });
       assert.equal(fallback.state.outlineBodies.length, 1, 'fallback must follow a real failed outline request');
-      assert.equal(await fallback.page.locator('#proposalOutput button[onclick="downloadHTMLPPT()"]') .count(), 1);
-      assert.equal(await fallback.page.locator('#proposalOutput button[onclick="downloadPPTX()"]') .count(), 1);
+      assert.equal(await fallback.page.locator('#proposalOutput button[data-tm-ppt-action="downloadHTMLPPT"]') .count(), 1);
+      assert.equal(await fallback.page.locator('#proposalOutput button[data-tm-ppt-action="downloadPPTX"]') .count(), 1);
       assert.match(await fallback.page.locator('#proposalOutput').textContent(), /Task 10 Fallback Brand/);
 
       const {
@@ -561,6 +564,9 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
       const fallbackHtml = fs.readFileSync(fallbackHtmlPath, 'utf8');
       assert.match(fallbackHtml, /Task 10 Fallback Brand/);
       assert.match(fallbackHtml, /<!DOCTYPE html>/i);
+      assert.match(fallbackHtml, /class="tm-deck-stage"/);
+      assert.equal((fallbackHtml.match(/class="tm-deck-slide/g) || []).length, 24);
+      assert.match(fallbackHtml, /建议先建立产品理解与信任，再推动购买/);
 
       const {
         download: fallbackPptxDownload,

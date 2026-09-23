@@ -27,6 +27,9 @@
     style: true,
     body: true,
     main: true,
+    header: true,
+    footer: true,
+    aside: true,
     div: true,
     section: true,
     article: true,
@@ -36,6 +39,8 @@
     h2: true,
     h3: true,
     strong: true,
+    small: true,
+    blockquote: true,
     br: true,
     button: true,
     table: true,
@@ -54,6 +59,7 @@
     class: true,
     style: true,
     lang: true,
+    'aria-label': true,
     'data-theme': true,
     'data-width': true
   });
@@ -242,6 +248,7 @@
     if (attributeName === 'id' && !isApprovedPreviewId(value)) element.removeAttribute(attribute.name);
     else if (attributeName === 'class' && !/^[A-Za-z0-9_-]+(?:\s+[A-Za-z0-9_-]+)*$/.test(value)) element.removeAttribute(attribute.name);
     else if (attributeName === 'lang' && value !== 'zh-CN') element.removeAttribute(attribute.name);
+    else if (attributeName === 'aria-label' && value.length > 200) element.removeAttribute(attribute.name);
     else if (attributeName === 'data-theme' && !/^[a-z0-9-]{1,48}$/.test(value)) element.removeAttribute(attribute.name);
     else if (attributeName === 'data-width' && !isSafeDecimal(value, 100)) element.removeAttribute(attribute.name);
     else if (attributeName === 'type' && (elementName !== 'button' || value !== 'button')) element.removeAttribute(attribute.name);
@@ -274,14 +281,21 @@
   function isFrozenDeckDocument(parsed, previewIds) {
     if (!parsed || !parsed.documentElement || String(parsed.documentElement.localName || '').toLowerCase() !== 'html') return false;
     var stage = previewIds.deckStage || null;
-    var stageSlides = typeof parsed.querySelectorAll === 'function' ? parsed.querySelectorAll('.slide') : [];
-    var stageProfile = !!stage
+    var legacyStageSlides = typeof parsed.querySelectorAll === 'function' ? parsed.querySelectorAll('.slide') : [];
+    var decisionStageSlides = typeof parsed.querySelectorAll === 'function' ? parsed.querySelectorAll('.tm-deck-slide') : [];
+    var legacyStageProfile = !!stage
       && hasClass(stage, 'deck-stage')
-      && stageSlides.length > 0
+      && legacyStageSlides.length > 0
       && !!previewIds.deckCounter
       && !!previewIds.deckProgress
       && parsed.querySelectorAll('.deck-controls').length > 0;
-    if (stageProfile) return true;
+    var decisionStageProfile = !!stage
+      && hasClass(stage, 'tm-deck-stage')
+      && decisionStageSlides.length > 0
+      && !!previewIds.deckCounter
+      && !!previewIds.deckProgress
+      && parsed.querySelectorAll('.tm-deck-controls').length > 0;
+    if (legacyStageProfile || decisionStageProfile) return true;
 
     var reportSections = typeof parsed.querySelectorAll === 'function' ? parsed.querySelectorAll('section[id]') : [];
     var reportCover = previewIds.cover;

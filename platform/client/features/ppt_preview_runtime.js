@@ -19,12 +19,15 @@
 
   function initializeStageDeck() {
     var stage = documentRef.getElementById('deckStage');
-    var slides = Array.prototype.slice.call(documentRef.querySelectorAll('.slide'));
+    var decisionDeck = !!stage && stage.classList.contains('tm-deck-stage');
+    var slideSelector = decisionDeck ? '.tm-deck-slide' : '.slide';
+    var controlSelector = decisionDeck ? '.tm-deck-controls button' : '.deck-controls button';
+    var slides = Array.prototype.slice.call(documentRef.querySelectorAll(slideSelector));
     if (!stage || !slides.length) return false;
 
     var counter = documentRef.getElementById('deckCounter');
     var progress = documentRef.getElementById('deckProgress');
-    var controls = documentRef.querySelectorAll('.deck-controls button');
+    var controls = documentRef.querySelectorAll(controlSelector);
     var index = 0;
 
     function fit() {
@@ -57,6 +60,8 @@
     global.addEventListener('keydown', function(event) {
       if (['ArrowRight', 'PageDown'].indexOf(event.key) >= 0 || isHandledSpace(event)) deck.next();
       if (['ArrowLeft', 'PageUp'].indexOf(event.key) >= 0) deck.prev();
+      if (event.key === 'Home') show(0);
+      if (event.key === 'End') show(slides.length - 1);
     });
     fit();
     show(0);
