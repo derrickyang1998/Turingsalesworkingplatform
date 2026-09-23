@@ -433,7 +433,7 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
   ];
   return {
     title: brand + ' ' + product + ' 海外红人营销方案',
-    subtitle: market + '客户决策版 / ' + budget,
+    subtitle: market + ' 客户决策版 / ' + budget,
     narrative: '先建立产品理解与信任，再推动购买。',
     brand,
     product,

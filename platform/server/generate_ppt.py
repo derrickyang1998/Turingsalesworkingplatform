@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import sys
 
 from pptx import Presentation
@@ -373,8 +374,10 @@ def render_split(slide, deck, section, mode):
     values = section["points"][:5]
     if mode == "positioning":
         lead = values.pop(0) if values else section["title"]
-        add_text(slide, f"“{split_point(lead)[1]}”", 0.65, 2.0,
-                 6.05, 3.8, 28, PURPLE, True,
+        statement = split_point(lead)[1]
+        statement_size = 20 if len(statement) > 42 else (23 if len(statement) > 30 else 28)
+        add_text(slide, f"“{statement}”", 0.65, 2.0,
+                 6.05, 3.8, statement_size, PURPLE, True,
                  valign=MSO_VERTICAL_ANCHOR.MIDDLE)
         add_rect(slide, 6.95, 1.95, 0.012, 4.45, LINE)
         for index, value in enumerate(values):
@@ -438,9 +441,8 @@ def render_scorecard(slide, section):
     for index, value in enumerate(section["points"][:7]):
         label, body = split_point(value)
         y = 2.0 + index * 0.62
-        digit_text = "".join(
-            char for char in f"{label} {body}" if char.isdigit())
-        score = max(12, min(100, int(digit_text[:3]))) if digit_text else max(25, 88 - index * 10)
+        score_match = re.search(r"(?<!\d)(\d{1,3})(?!\d)", body)
+        score = max(12, min(100, int(score_match.group(1)))) if score_match else max(25, 88 - index * 10)
         add_text(slide, label, 0.65, y, 2.1,
                  0.3, 12, INK, True)
         add_rect(slide, 2.9, y + 0.08, 5.8,
