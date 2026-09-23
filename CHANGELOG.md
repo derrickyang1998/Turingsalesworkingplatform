@@ -1,5 +1,20 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.27-decision-deck-preview-production (Production Deployed, 2026-09-23) - 客户决策型方案与 PPT 预览增量
+
+### 交付范围 / Delivery Scope
+- 保留最新客户决策型方案结构，HTMLPPT 与 PPTX 共用品牌、产品、证据边界和客户决策叙事；API 失败时仍可在前端生成结构化本地兜底草稿。
+- PPTX 渲染升级为 16:9 客户汇报版，补齐长定位文案字号保护和评分数字解析；CSP 预览白名单支持决策型 deck 的结构、可访问标签和安全预览动作。
+- 预览契约覆盖生成、编辑、HTML 下载、PPTX 下载、回退路径和浏览器交互；部署浏览器冒烟 `3/3`，决策型 PPT bridge `2/2`，最新 UI 定向测试 `5/5` 通过。本地 PPTX 质量测试因 Windows 环境缺少 `python-pptx` 未单独通过，但生产候选机已安装依赖并在候选门禁执行。
+
+### 生产验收 / Production Acceptance
+- 生产提交 `9cc7bc5`（前置 `b6903ba`、`08d1265`）已上线；正式运行 `2a229af823ab43d7b79349f798898143` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 和 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 生产备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260923-142647`，`SHA256SUMS` SHA-256：`9d32bd4c341b96906e33ab5ce13c00d0f72aac1b4744050f63ae52ac4b89bd89`；AI 并发证据：`6e76bfbe3ff19d60b90f50dd0800accd64508250be55e4ec4c60eb36cf31a99e`；账单证据：`0c9a338005419f244ffcf7cc949320b2c1a23bb2af933dee1c403f1458591307`。
+- 两次凭据保护门禁均为 `PROTECTED_CREDENTIALS_UNCHANGED 39`；本轮没有使用 `derrick` 做发布烟测，也没有修改或轮换其凭据。
+
+### 保留项 / Preserved Parallel Work
+- `platform/server/tests/proposal_deck_quality.test.js` 及部署后新出现的 `app.js`、CSP 预览初始化和浏览器契约改动保留在工作区，未声称已上线，待下一轮独立审查后再决定是否发布。
+
 ## v0.9.26a-production-credential-protection-hotfix (Production Deployed, 2026-09-21) - 生产管理员凭据保护
 
 ### 根因与恢复 / Root Cause And Restoration
