@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const latestUiCompat = require('../services/latest_ui_compat_service');
 
+const appPath = path.join(__dirname, '..', '..', 'app.js');
 const generatorPath = path.join(__dirname, '..', 'generate_ppt.py');
 
 function demand() {
@@ -69,6 +70,16 @@ test('fallback is the approved 24-page decision flow and preserves client identi
   const capabilityIndex = outline.sections.findIndex((section) => section.type === 'capability');
   assert.ok(capabilityIndex >= Math.floor(outline.sections.length * 0.7));
   assert.ok(outline.sections.every((section) => section.layout));
+});
+
+test('HTML decision deck lets its runtime position the fixed 16:9 stage exactly once', () => {
+  const source = fs.readFileSync(appPath, 'utf8');
+  const marker = source.indexOf('// ===== DECISION DECK V2 RENDERER =====');
+  assert.notEqual(marker, -1);
+  const renderer = source.slice(marker);
+  assert.match(renderer, /\.tm-deck-viewport\{position:fixed;inset:0;overflow:hidden\}/);
+  assert.match(renderer, /\.tm-deck-stage\{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0/);
+  assert.doesNotMatch(renderer, /\.tm-deck-viewport\{[^}]*display:grid[^}]*place-items:center/);
 });
 
 test('PPTX generator keeps canonical page count, client identity, content, and layout variety', { timeout: 30_000 }, () => {

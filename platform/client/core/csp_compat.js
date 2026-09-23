@@ -450,6 +450,51 @@
     if (typeof global.toast === 'function') global.toast(message, 'error');
   }
 
+  function initializeDecisionDeckPreview(popup) {
+    if (!popup || !popup.document || typeof popup.document.querySelectorAll !== 'function') return false;
+    var stage = popup.document.getElementById('deckStage');
+    var slides = Array.prototype.slice.call(popup.document.querySelectorAll('.tm-deck-slide'));
+    if (!stage || !hasClass(stage, 'tm-deck-stage') || !slides.length) return false;
+
+    var counter = popup.document.getElementById('deckCounter');
+    var progress = popup.document.getElementById('deckProgress');
+    var controls = popup.document.querySelectorAll('.tm-deck-controls button');
+    var index = 0;
+    function fit() {
+      var scale = Math.min(popup.innerWidth / 1920, popup.innerHeight / 1080);
+      var x = (popup.innerWidth - 1920 * scale) / 2;
+      var y = (popup.innerHeight - 1080 * scale) / 2;
+      stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
+    }
+    function show(nextIndex) {
+      index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+      slides.forEach(function(slide, slideIndex) {
+        slide.classList.toggle('active', slideIndex === index);
+      });
+      if (counter) counter.textContent = (index + 1) + ' / ' + slides.length;
+      if (progress) progress.style.width = ((index + 1) / slides.length * 100) + '%';
+    }
+    var deck = Object.freeze({
+      next: function() { show(index + 1); },
+      prev: function() { show(index - 1); },
+      show: show,
+      fit: fit
+    });
+    popup.deck = deck;
+    if (controls[0]) controls[0].addEventListener('click', deck.prev);
+    if (controls[1]) controls[1].addEventListener('click', deck.next);
+    popup.addEventListener('resize', fit);
+    popup.addEventListener('keydown', function(event) {
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || (event.key === ' ' && String(event.target && event.target.tagName || '').toUpperCase() !== 'BUTTON')) deck.next();
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') deck.prev();
+      if (event.key === 'Home') show(0);
+      if (event.key === 'End') show(slides.length - 1);
+    });
+    fit();
+    show(0);
+    return true;
+  }
+
   function renderPreviewDocument(popup, html) {
     if (typeof global.DOMParser !== 'function') {
       showPreviewError('Safe PPT preview is not supported by this browser.');
@@ -477,6 +522,7 @@
       return false;
     }
     popup.document.replaceChild(importedRoot, popup.document.documentElement);
+    if (initializeDecisionDeckPreview(popup)) return true;
     var runtime = popup.document.createElement('script');
     runtime.src = PREVIEW_RUNTIME_PATH;
     runtime.async = false;

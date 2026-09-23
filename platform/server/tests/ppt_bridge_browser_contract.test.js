@@ -519,7 +519,62 @@ test('Task 10 locked PPT bridge preserves the complete decision-deck workflow', 
       await success.page.evaluate(() => window.previewPPT());
       const popup = await popupPromise;
       await popup.waitForFunction(() => document.body && document.body.innerText.includes('Task 10 Edited Deck'));
+      await popup.waitForFunction(() => (
+        window.deck &&
+        typeof window.deck.next === 'function' &&
+        getComputedStyle(document.getElementById('deckStage')).transform !== 'none'
+      ));
+      const previewRuntimeState = await popup.evaluate(() => ({
+        deckType: typeof window.deck,
+        stageClass: document.getElementById('deckStage')?.className || '',
+        slideCount: document.querySelectorAll('.tm-deck-slide').length
+      }));
+      assert.equal(previewRuntimeState.deckType, 'object', 'preview runtime must initialize: ' + JSON.stringify({
+        runtime: previewRuntimeState,
+        pageErrors: success.state.pageErrors,
+        externalRequests: success.state.externalRequests
+      }));
       assert.match(await popup.title(), /Task 10 Edited Deck/);
+      const previewGeometry = await popup.evaluate(() => {
+        const rect = document.querySelector('.tm-deck-slide.active').getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          right: rect.right,
+          bottom: rect.bottom,
+          viewportWidth: innerWidth,
+          viewportHeight: innerHeight
+        };
+      });
+      const previewGeometryMessage = JSON.stringify(previewGeometry);
+      assert.ok(previewGeometry.x >= -1 && previewGeometry.y >= -1, 'decision deck must not be clipped at the top or left: ' + previewGeometryMessage);
+      assert.ok(previewGeometry.right <= previewGeometry.viewportWidth + 1, 'decision deck must fit within preview width: ' + previewGeometryMessage);
+      assert.ok(previewGeometry.bottom <= previewGeometry.viewportHeight + 1, 'decision deck must fit within preview height: ' + previewGeometryMessage);
+
+      await popup.setViewportSize({ width: 390, height: 844 });
+      await popup.waitForFunction(() => {
+        const rect = document.querySelector('.tm-deck-slide.active')?.getBoundingClientRect();
+        return rect && rect.width <= innerWidth + 1 && rect.bottom <= innerHeight + 1;
+      });
+      const mobilePreviewGeometry = await popup.evaluate(() => {
+        const rect = document.querySelector('.tm-deck-slide.active').getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          right: rect.right,
+          bottom: rect.bottom,
+          viewportWidth: innerWidth,
+          viewportHeight: innerHeight,
+          scrollWidth: document.documentElement.scrollWidth,
+          scrollHeight: document.documentElement.scrollHeight
+        };
+      });
+      const mobileGeometryMessage = JSON.stringify(mobilePreviewGeometry);
+      assert.ok(mobilePreviewGeometry.x >= -1 && mobilePreviewGeometry.y >= -1, 'mobile decision deck must not be clipped: ' + mobileGeometryMessage);
+      assert.ok(mobilePreviewGeometry.right <= mobilePreviewGeometry.viewportWidth + 1, 'mobile decision deck must fit within the viewport: ' + mobileGeometryMessage);
+      assert.ok(mobilePreviewGeometry.bottom <= mobilePreviewGeometry.viewportHeight + 1, 'mobile decision deck must fit within the viewport height: ' + mobileGeometryMessage);
+      assert.equal(mobilePreviewGeometry.scrollWidth, mobilePreviewGeometry.viewportWidth, 'mobile decision deck must not cause horizontal scrolling: ' + mobileGeometryMessage);
+      assert.equal(mobilePreviewGeometry.scrollHeight, mobilePreviewGeometry.viewportHeight, 'mobile decision deck must not cause vertical scrolling: ' + mobileGeometryMessage);
       await popup.close();
 
       await success.page.bringToFront();
