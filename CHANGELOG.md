@@ -1,5 +1,26 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.29-client-ready-demand-specific-proposal-decks (Production Deployed, 2026-09-23) - 客户化需求方案与 PPT 交付升级
+
+### 交付范围 / Delivery Scope
+- 参考近期 Siterwell 客户方案的视觉层级与商务表达，方案规划、HTMLPPT 与 PPTX 统一为固定 24 页客户决策叙事；TideWe 等需求会从上传内容提取品牌、产品、市场、平台、受众、档期与卖点，不再回退为通用营销模板。
+- TideWe 生产样例保留 `BL001 / BL008 Hunting Blind`、美国市场、YouTube、30+ 男性狩猎受众、12 月上线窗口及透视、静音、快速收放等真实需求信息，并生成市场判断、定位、达人组合、内容系统、创意样例、执行、衡量和商务下一步。
+- HTMLPPT 与 PPTX 统一使用客户可展示的紫/黄/黑/白视觉体系、Noto Sans SC 和 16:9 版式；修复 mojibake，并移除 `AI生成的方案`、`AI草稿`、`AI大纲`、知识编号和内部校验措辞，同时保留 `AI Camera`、`AI 分析告警` 等真实产品事实。
+- Campaign 自动 RAG 仅检索当前 Campaign；非 Campaign 请求按明确的需求、客户或品牌业务实体隔离。用户显式选择的知识仍沿用既有授权，防止跨客户知识混入方案。
+- AI 草稿 -> 人工编辑/确认 -> 最终 HTMLPPT/PPTX、知识归档及审计链保持不变；冻结 `platform/ppt.js` SHA-256 仍为 `1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821`。
+
+### 定向验证与独立审查 / Focused Verification And Independent Review
+- 方案质量、AI/知识库、Campaign RAG、客户请求与浏览器桥接定向回归 `48/48` 通过；可信生产源码与部署合同门禁 `97/97` 通过，JavaScript/Python 语法、`git diff --check`、冻结文件摘要和密钥扫描通过。
+- 本地真实 TideWe HTMLPPT/PPTX 均为 24 页；PPTX 与 HTML 样例蒙版完成视觉检查，无乱码、内部编写标签、页面错序或空白舞台。
+- 独立审查先发现跨客户自动检索范围与合法 AI 产品词误删风险；修复为业务实体范围检索及精确内部标签清洗后，最终结论 `APPROVE`，开放 P0-P2 为 0。
+
+### 生产验收 / Production Acceptance
+- 功能提交 `12a4d21ef36ff110e0be872f95aaf1365805b963` 已同步 GitHub 并部署。正式运行 `1223aac2ae82473ca1441cd0f279c21f` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 与 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260923-230545`，`SHA256SUMS` SHA-256 为 `dfe544a12bfdb07f64f5435838bca26a66b0c33c92443dc543fca5b377a40a1d`；候选树 SHA-256 为 `dd1bdc1ddf8af7f9dd5561cb694aa996a372c2f1c0a5dcd86c742b458636f96a`，接纳事实 SHA-256 为 `ec96757f84933407bb3a518efa93a5070fada69a4f18d882c43b6ca971087123`。
+- 公网 `/api/health`、`/m3`、`/admin` 均为 `200`，PM2 online、解析器 ready。公网 `app.js` 与 `ppt.js` 摘要与本地接纳版本完全一致，HTMLPPT 前端链路已实际加载本次版本。
+- 使用专用 `release-smoke` 身份在线生成 TideWe PPTX：24 页、84,839 bytes，包含客户关键事实且不含禁用内部文案；SQLite `quick_check=ok`、外键检查为 0，临时会话和烟测知识条目清理为 0。
+- 首次发布控制会话在 `writers-stopped`、生产代码尚未变更时中断；专用恢复路径返回 `ROLLBACK_OK` 并恢复公网 200，随后重新执行完整受保护发布并成功接纳。两次凭据门禁均为 `PROTECTED_CREDENTIALS_UNCHANGED 39`，未使用、修改或轮换 `derrick` 凭据。
+
 ## v0.9.28-admin-operations-and-decision-deck-hardening (Production Deployed, 2026-09-23) - 运营审计与 24 页决策型 PPT 稳定化
 
 ### 交付范围 / Delivery Scope
