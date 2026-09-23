@@ -41,7 +41,8 @@ test('proposal and deck prompts require a client decision story with evidence bo
     knowledgeContext: '[KB-1] Approved playbook',
     research: { results: [] }
   });
-  assert.match(deckPrompt, /18-24/);
+  assert.match(deckPrompt, /正好 24 页/);
+  assert.doesNotMatch(deckPrompt, /18-24/);
   assert.match(deckPrompt, /80%/);
   assert.match(deckPrompt, /20%/);
   assert.match(deckPrompt, /brand, product/);
@@ -70,6 +71,36 @@ test('fallback is the approved 24-page decision flow and preserves client identi
   const capabilityIndex = outline.sections.findIndex((section) => section.type === 'capability');
   assert.ok(capabilityIndex >= Math.floor(outline.sections.length * 0.7));
   assert.ok(outline.sections.every((section) => section.layout));
+});
+
+test('AI outline normalization repairs noncanonical output to the approved 24-page flow', () => {
+  const fallback = latestUiCompat.buildPptOutlineFallback(
+    demand(),
+    '# Approved proposal',
+    '',
+    { used: false, results: [] }
+  );
+  const repaired = latestUiCompat.normalizePptOutline({
+    title: 'AI customer decision deck',
+    brand: 'Northstar Home',
+    product: 'Home safety alarm',
+    sections: [{
+      title: 'AI recommendation retained',
+      type: 'recommendation',
+      layout: 'recommendation',
+      points: ['Use verified customer evidence']
+    }]
+  }, fallback, { used: false, results: [] });
+
+  assert.equal(repaired.sections.length, 24);
+  assert.equal(repaired.sections[0].type, 'cover');
+  assert.equal(repaired.sections[1].title, 'AI recommendation retained');
+  assert.equal(repaired.sections.at(-1).type, 'next');
+  assert.equal(repaired.structure_repaired, true);
+
+  const canonical = latestUiCompat.normalizePptOutline({ sections: fallback.sections }, fallback, {});
+  assert.equal(canonical.sections.length, 24);
+  assert.equal(canonical.structure_repaired, false);
 });
 
 test('HTML decision deck lets its runtime position the fixed 16:9 stage exactly once', () => {

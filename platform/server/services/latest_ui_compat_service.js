@@ -364,9 +364,9 @@ function buildPptOutlinePrompt(input) {
   return [
     '为 TuringMarket 生成客户决策型海外红人营销演示大纲。HTMLPPT 与 PPTX 将共用这份结构化数据。',
     '只返回 JSON，不要 Markdown 代码块或解释。顶层字段：title, subtitle, narrative, brand, product, sections。brand 与 product 必须沿用需求表原文。',
-    'sections 必须为 18-24 页且包含封面。约80%页面回答客户的产品、市场、策略、内容、执行和衡量问题，约20%页面用于图灵能力证明，并把公司能力放在后段。',
+    'sections 必须正好 24 页且包含封面。约80%页面回答客户的产品、市场、策略、内容、执行和衡量问题，约20%页面用于图灵能力证明，并把公司能力放在后段。',
     '每页字段：title, type, layout, points, note, kicker, visual_brief, evidence_labels, status。points 为 2-6 条短句；evidence_labels 为 [KB-n] 或公开来源标签数组；status 只能是 confirmed、inference、pending。',
-    '建议顺序：cover；recommendation；brief；challenge；market；comparison；positioning；audience；sequence；boundaries；platform；creator_mix；scoring；content_system；creative（1-2页）；format（长视频与短视频）；compliance；timeline；measurement；commercial；capability；next。可以按资料删减，但不得跳过 recommendation、brief、boundaries、compliance、measurement、capability、next。',
+    '固定顺序：1 cover；2 recommendation；3 brief；4 challenge；5 market；6 comparison；7 positioning；8 audience；9 sequence；10 boundaries；11 platform；12 creator_mix；13 scoring；14 content_system；15-16 creative；17-18 format（长视频、短视频各一页）；19 compliance；20 timeline；21 measurement；22 commercial；23 capability；24 next。不得删减、合并或调换页面。',
     'layout 从 cover-image, recommendation, brief-register, four-challenges, evidence-table, positioning, audience-scene, sequence, boundary-columns, platform-roles, creator-mix, scorecard, content-system, creative-split, format-storyboard, dark-guardrail, timeline, asset-pillars, comparison-table, capability-proof, next-steps 中选择。',
     '页面标题必须表达本页判断，避免“市场分析”“内容策略”等空标题。先写结论，再给证据和动作。每页只解决一个问题。',
     '不得编造产品功能、认证、团队、案例、数据、价格、投放结果或图片。visual_brief 只描述应使用的真实产品/场景视觉；没有已授权素材时明确写“使用客户提供素材或概念场景示意”。',
@@ -624,8 +624,8 @@ function normalizePptOutline(value, fallback, research) {
   out.narrative = out.narrative || (fallback && fallback.narrative) || '';
   out.brand = out.brand || (fallback && fallback.brand) || '';
   out.product = out.product || (fallback && fallback.product) || '';
-  out.sections = Array.isArray(out.sections) ? out.sections : (fallback && fallback.sections) || [];
-  out.sections = out.sections.map(function(sec, index) {
+  function normalizeSection(sec, index) {
+    sec = sec && typeof sec === 'object' ? sec : {};
     return {
       title: sec.title || ('Slide ' + (index + 1)),
       type: sec.type || 'content',
@@ -637,7 +637,36 @@ function normalizePptOutline(value, fallback, research) {
       evidence_labels: Array.isArray(sec.evidence_labels) ? sec.evidence_labels.map(String).filter(Boolean) : [],
       status: ['confirmed', 'inference', 'pending'].includes(sec.status) ? sec.status : 'inference'
     };
-  }).filter(function(sec) { return sec.title; });
+  }
+  const generatedSections = (value && Array.isArray(value.sections) ? value.sections : [])
+    .map(normalizeSection)
+    .filter(function(sec) { return sec.title; });
+  const fallbackSections = (fallback && Array.isArray(fallback.sections) ? fallback.sections : [])
+    .map(normalizeSection)
+    .filter(function(sec) { return sec.title; });
+  if (fallbackSections.length === 24 && generatedSections.length !== 24) {
+    const generatedByType = new Map();
+    generatedSections.forEach(function(section) {
+      const type = String(section.type || 'content');
+      if (!generatedByType.has(type)) generatedByType.set(type, []);
+      generatedByType.get(type).push(section);
+    });
+    out.sections = fallbackSections.map(function(baseSection) {
+      const candidates = generatedByType.get(String(baseSection.type || 'content')) || [];
+      const candidate = candidates.shift();
+      if (!candidate) return baseSection;
+      return Object.assign({}, baseSection, candidate, {
+        type: baseSection.type,
+        layout: candidate.layout || baseSection.layout
+      });
+    });
+    out.structure_repaired = true;
+    out.structure_warning = 'AI outline was normalized to the approved 24-page decision flow.';
+  } else {
+    out.sections = generatedSections.length ? generatedSections : fallbackSections;
+    out.structure_repaired = false;
+    out.structure_warning = '';
+  }
   out.research = out.research || research || (fallback && fallback.research);
   return out;
 }
