@@ -1,5 +1,21 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.30-billing-capability-evidence-reconciliation (Production Capability Confirmed, 2026-09-24) - 组织计费能力证据收口
+
+### 当前状态 / Current Status
+- 组织计费策略、月度账单投影与不可变结算能力已包含在当前生产交付分支；功能提交 `59c79e032b5a8990cd9ae5b0d57de608c7e03cce` 已由当前生产分支 `6911aaf` 包含。
+- schema v31 的迁移、组织计费服务、租户权限 API、管理员紧凑控制、验收脚本和发布清单均已保留；本轮未修改 `derrick` 凭据，也未执行凭据轮换。
+- 生产只读核验：`/api/health` 返回 `200`；`/api/organization-billing` 未认证请求返回 `401 No token provided`；公开 `app.js` 包含账单策略标识，说明当前公网源码已暴露对应能力边界。
+
+### 定向验证 / Focused Verification
+- 账单迁移、服务、路由、管理 UI、验收脚本与发布清单定向测试 `27/27` 通过。
+- `node --check` 覆盖 `platform/app.js`、`server.js`、账单服务和账单路由；`git diff --check` 通过。
+- 本记录是暂停后恢复工作的证据对账，不宣称本轮重新执行生产切换；阶段 8 仍需完成正式收口矩阵、外部归档和最终线上证据汇总。
+
+### 范围边界 / Scope Boundary
+- v1 仅覆盖组织计费策略、当前月预估、已结束月份不可变账单和受限管理员结算；不包含收款、发票、税费、退款、抵扣、动态定价或支付网关。
+- 下一步为第 8 阶段收口与独立最终审查；既有 CRM、网红、飞书、AI/知识库、方案和 PPT 界面不变。
+
 ## v0.9.29-client-ready-demand-specific-proposal-decks (Production Deployed, 2026-09-23) - 客户化需求方案与 PPT 交付升级
 
 ### 交付范围 / Delivery Scope
