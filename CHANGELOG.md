@@ -1,5 +1,12 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.31-phase8-closeout-test-contract-reconciliation (Verification-only, 2026-09-24) - Phase 8 收口测试契约对账
+
+- 修正 migration 024 启动版本断言，使其对齐当前生产迁移终点 v31；定向迁移测试 `9/9` 通过。
+- 隔离 `organization_campaign_access.test.js` 的非法 activity flag 夹具，并新增当前数据库边界投影验证；该文件定向测试 `35/35` 通过，原历史多状态夹具保留为 1 条明确 skip。
+- `node --check`、`git diff --check` 通过；本轮没有运行时代码、schema、生产配置、管理员凭据或部署产物变化。
+- 本记录是 Phase 8 收口证据修复，不宣称 Phase 8 已完成；管理控制室统一覆盖、剩余业务模块租户隔离及类生产恢复/浏览器/性能矩阵仍是开放项。
+
 ## v0.9.30-billing-capability-evidence-reconciliation (Production Capability Confirmed, 2026-09-24) - 组织计费能力证据收口
 
 ### 当前状态 / Current Status

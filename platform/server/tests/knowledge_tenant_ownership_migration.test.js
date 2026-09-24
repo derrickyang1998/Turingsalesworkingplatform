@@ -980,5 +980,5 @@ test('db.js registers migration 024 for normal database startup', (t) => {
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const output = result.stdout.trim().split(/\r?\n/).filter(Boolean);
-  assert.deepEqual(JSON.parse(output.at(-1)), { version: 24, hasOrgId: 1 });
+    assert.deepEqual(JSON.parse(output.at(-1)), { version: 31, hasOrgId: 1 });
 });

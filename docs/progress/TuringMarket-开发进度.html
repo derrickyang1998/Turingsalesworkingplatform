@@ -375,13 +375,13 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.30 · 组织计费能力证据收口</h2>
-        <p class="release-copy">当前生产交付分支已包含组织计费策略、月度预估与不可变账单能力。schema v31、BigInt 安全计算、租户权限、管理员控制与验收脚本已通过定向验证；本轮完成生产只读证据对账，不执行新的凭据或生产写入。</p>
+        <h2 class="release-title">v0.9.31 · Phase 8 收口测试契约对账</h2>
+        <p class="release-copy">本轮完成 migration 024 与 campaign 权限收口测试契约修复，定向测试通过；不改变运行时代码、schema、凭据或生产部署，Phase 8 仍待最终收口。</p>
         <div class="chips">
           <span class="chip good">2026-09-24 证据已核对</span>
           <span class="chip">Schema v31</span>
-          <span class="chip">Billing tests 27 / 27</span>
-          <span class="chip">Production read-only confirmed</span>
+          <span class="chip">Migration 024 tests 9 / 9</span>
+          <span class="chip">Campaign access tests 35 / 35</span>
           <span class="chip">Phase 8 closeout pending</span>
         </div>
       </div>
@@ -423,6 +423,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.31 · 2026-09-24</code><div><b>Phase 8 收口测试契约对账</b><p class="hint">Migration 024 9/9, campaign access 35/35, verification-only</p></div><span class="badge active">AUDITED</span></div>
         <div class="release"><code>v0.9.30 · 2026-09-24</code><div><b>组织计费能力证据收口</b><p class="hint">Schema v31, immutable statements, 27/27 focused tests, read-only production confirmation</p></div><span class="badge active">AUDITED</span></div>
         <div class="release"><code>v0.9.26 · 2026-09-21</code><div><b>AI Provider 持久并发预留</b><p class="hint">Durable permit, fail-closed admission, exact restore</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.25 · 2026-09-21</code><div><b>组织月度共享 AI 配额</b><p class="hint">UTC monthly quota, provider preflight, audited editing</p></div><span class="badge live">ONLINE</span></div>
