@@ -1,5 +1,12 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.33-ai-audit-fixture-compatibility (Verification ready, 2026-09-24) - AI 审计夹具兼容性修复
+
+- 为仍覆盖旧 schema v12 的 AI 对话审计测试夹具补齐当前 AI admission 只读所需的组织 Token 配额、Provider 并发策略和预留账本投影；未修改生产服务、迁移文件或生产数据库。
+- 保留旧版本权限与兼容性测试范围，避免用升级到 v31 的方式掩盖历史行为验证；当前 AI 对话审计文件 `15/15` 通过，与管理员运营控制室相关定向矩阵合计 `43/43` 通过。
+- `node --check`、`git diff --check` 通过；独立审查未发现生产代码或凭据边界变化。
+- 本轮未执行生产部署、凭据操作或 `derrick` 烟测；GitHub 推送因外部网络不可达仍待重试，线上发布仍需受控主机配置和专用 `release-smoke` 验收。
+
 ## v0.9.32-admin-operations-health-projection (Implementation ready, 2026-09-24) - 管理控制室运营健康投影
 
 - 管理员运营事件控制室现在在既有 `/api/admin/operations` 只读响应中增加 Provider 运行、飞书 outbox、网红导入批次、工作流实例/任务和安全事件健康投影。

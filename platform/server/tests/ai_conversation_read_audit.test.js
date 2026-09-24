@@ -227,6 +227,72 @@ function createFixture(db) {
     teamId: 100
   });
 
+  // The legacy v12 fixture predates the tenant-owned quota migrations. Keep
+  // the compatibility schema while supplying the read-only columns required
+  // by the current AI admission path.
+  db.exec(`
+    ALTER TABLE token_usage ADD COLUMN org_id INTEGER;
+    CREATE TABLE organization_ai_quota_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org_id INTEGER NOT NULL,
+      policy_version INTEGER NOT NULL,
+      monthly_limit INTEGER,
+      changed_by INTEGER,
+      reason TEXT,
+      source TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX ux_test_organization_ai_quota_policies_version
+      ON organization_ai_quota_policies(org_id,policy_version);
+    CREATE TABLE organization_ai_concurrency_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org_id INTEGER NOT NULL,
+      policy_version INTEGER NOT NULL,
+      concurrency_limit INTEGER NOT NULL,
+      changed_by INTEGER,
+      reason TEXT,
+      source TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX ux_test_organization_ai_concurrency_policy_version
+      ON organization_ai_concurrency_policies(org_id,policy_version);
+    CREATE TABLE ai_provider_reservations (
+      reservation_id TEXT PRIMARY KEY,
+      org_id INTEGER NOT NULL,
+      actor_user_id INTEGER NOT NULL,
+      operation_key TEXT NOT NULL,
+      fence_token TEXT NOT NULL UNIQUE,
+      state TEXT NOT NULL,
+      acquired_at TEXT NOT NULL,
+      provider_deadline_at TEXT NOT NULL,
+      reclaim_after TEXT NOT NULL,
+      provider_completed_at TEXT,
+      terminal_at TEXT
+    );
+    CREATE TABLE ai_provider_reservation_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reservation_id TEXT,
+      org_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      event_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    );
+  `);
+  db.prepare(`
+    INSERT INTO organization_ai_quota_policies
+      (org_id,policy_version,monthly_limit,source)
+    SELECT id,1,NULL,'organization_default'
+    FROM organizations
+    ORDER BY id
+  `).run();
+  db.prepare(`
+    INSERT INTO organization_ai_concurrency_policies
+      (org_id,policy_version,concurrency_limit,source)
+    SELECT id,1,10,'organization_default'
+    FROM organizations
+    ORDER BY id
+  `).run();
+
   return {
     owner: user(db, 2),
     teammate: user(db, 3),
