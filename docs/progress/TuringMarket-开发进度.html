@@ -375,14 +375,14 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.31 · Phase 8 收口测试契约对账</h2>
-        <p class="release-copy">本轮完成 migration 024 与 campaign 权限收口测试契约修复，定向测试通过；不改变运行时代码、schema、凭据或生产部署，Phase 8 仍待最终收口。</p>
+        <h2 class="release-title">v0.9.32 · 管理控制室运营健康投影</h2>
+        <p class="release-copy">既有管理员运营事件入口增加 Provider、飞书 outbox、网红导入、工作流和安全事件的只读健康投影。28 项定向测试通过，待专用身份受控发布；Phase 8 仍待最终收口。</p>
         <div class="chips">
           <span class="chip good">2026-09-24 证据已核对</span>
           <span class="chip">Schema v31</span>
-          <span class="chip">Migration 024 tests 9 / 9</span>
-          <span class="chip">Campaign access tests 35 / 35</span>
-          <span class="chip">Phase 8 closeout pending</span>
+          <span class="chip">Admin operations tests 28 / 28</span>
+          <span class="chip">Read-only health projection</span>
+          <span class="chip">Production pending</span>
         </div>
       </div>
 
@@ -391,7 +391,7 @@
         <div class="focus-list">
           <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段收口</b><p class="hint">Phase 8 closeout and evidence reconciliation</p></div></div>
           <div class="focus-row"><span class="index">2</span><div><b>独立最终审查</b><p class="hint">Independent final review and release gate</p></div></div>
-          <div class="focus-row"><span class="index">3</span><div><b>动态目录边界</b><p class="hint">Separately approved catalog editing boundary</p></div></div>
+        <div class="focus-row"><span class="index">3</span><div><b>受控生产发布</b><p class="hint">Dedicated smoke identity, backup, and remote evidence</p></div></div>
         </div>
       </aside>
     </section>
@@ -423,6 +423,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.32 · 2026-09-24</code><div><b>管理控制室运营健康投影</b><p class="hint">Provider, Feishu, import, workflow, security projection; 28/28 tests</p></div><span class="badge active">READY</span></div>
         <div class="release"><code>v0.9.31 · 2026-09-24</code><div><b>Phase 8 收口测试契约对账</b><p class="hint">Migration 024 9/9, campaign access 35/35, verification-only</p></div><span class="badge active">AUDITED</span></div>
         <div class="release"><code>v0.9.30 · 2026-09-24</code><div><b>组织计费能力证据收口</b><p class="hint">Schema v31, immutable statements, 27/27 focused tests, read-only production confirmation</p></div><span class="badge active">AUDITED</span></div>
         <div class="release"><code>v0.9.26 · 2026-09-21</code><div><b>AI Provider 持久并发预留</b><p class="hint">Durable permit, fail-closed admission, exact restore</p></div><span class="badge live">ONLINE</span></div>

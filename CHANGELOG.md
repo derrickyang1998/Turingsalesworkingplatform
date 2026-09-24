@@ -1,5 +1,13 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.32-admin-operations-health-projection (Implementation ready, 2026-09-24) - 管理控制室运营健康投影
+
+- 管理员运营事件控制室现在在既有 `/api/admin/operations` 只读响应中增加 Provider 运行、飞书 outbox、网红导入批次、工作流实例/任务和安全事件健康投影。
+- 健康投影仅读取固定白名单表/字段；服务层继续校验平台管理员身份，管理员读取审计不会被计入安全业务事件。
+- 控制室 UI 增加运营健康摘要区域，保留既有事件筛选、分页和管理员全量审计能力。
+- 定向测试 `28/28` 通过；`node --check`、`git diff --check` 通过；独立代码审查无阻断发现。
+- 本轮未执行生产部署、凭据操作或 `derrick` 烟测；这是一个无 schema 变更的 Phase 8 功能切片，待受控备份、发布和专用身份线上验收。
+
 ## v0.9.31-phase8-closeout-test-contract-reconciliation (Verification-only, 2026-09-24) - Phase 8 收口测试契约对账
 
 - 修正 migration 024 启动版本断言，使其对齐当前生产迁移终点 v31；定向迁移测试 `9/9` 通过。

@@ -114,6 +114,7 @@ test('existing admin control room exposes the organization directory as a routed
     'admin-tab-operations',
     'ad_operationsSearch',
     'ad_operationsCategory',
+    'ad_operationsHealth',
     'ad_operationsList',
     'ad_operationsMore'
   ]) {
@@ -132,6 +133,7 @@ test('operations paging ignores stale filters and coalesces repeated load-more r
     ad_operationsCategory: { value: '' },
     ad_operationsStatus: { textContent: '' },
     ad_operationsSummary: { innerHTML: '' },
+    ad_operationsHealth: { innerHTML: '' },
     ad_operationsList: { innerHTML: '' },
     ad_operationsMore: { hidden: true, disabled: false }
   };

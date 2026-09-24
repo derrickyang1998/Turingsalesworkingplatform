@@ -10090,6 +10090,29 @@ function renderAdminOperations(data) {
   if (summaryEl) summaryEl.innerHTML = ['provider','import','workflow','security'].map(function(key) {
     return '<div class="stat"><div class="stat-value">' + esc(String(Number(summary[key]) || 0)) + '</div><div class="stat-label">' + esc(labels[key]) + '</div></div>';
   }).join('');
+  var health = data.health && typeof data.health === 'object' ? data.health : {};
+  var healthEl = document.getElementById('ad_operationsHealth');
+  if (healthEl) {
+    var provider = health.provider || {};
+    var feishu = health.feishu || {};
+    var imports = health.imports || {};
+    var workflow = health.workflow || {};
+    var security = health.security || {};
+    function statusTotal(value) {
+      return Object.keys(value && typeof value === 'object' ? value : {}).reduce(function(total, key) {
+        return total + (Number(value[key]) || 0);
+      }, 0);
+    }
+    healthEl.innerHTML = [
+      ['Provider运行', statusTotal(provider.status_counts), provider.latest_at || '暂无记录'],
+      ['飞书队列', statusTotal(feishu.status_counts), feishu.latest_at || '暂无记录'],
+      ['导入批次', Number(imports.batches) || 0, imports.latest_at || '暂无记录'],
+      ['工作流实例', statusTotal(workflow.instance_status_counts), workflow.latest_at || '暂无记录'],
+      ['安全事件', Number(security.event_count) || 0, '审计日志累计']
+    ].map(function(item) {
+      return '<div class="stat"><div class="stat-value">' + esc(String(item[1])) + '</div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-help">' + esc(String(item[2])) + '</div></div>';
+    }).join('');
+  }
   var events = Array.isArray(data.events) ? data.events : [];
   var listEl = document.getElementById('ad_operationsList');
   if (!listEl) return;

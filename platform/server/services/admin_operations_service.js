@@ -84,6 +84,87 @@ function categorySql() {
   END`;
 }
 
+function tableExists(db, tableName) {
+  return Boolean(db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"
+  ).get(tableName));
+}
+
+function columnExists(db, tableName, columnName) {
+  if (!tableExists(db, tableName)) return false;
+  return db.prepare(`PRAGMA table_info(${tableName})`).all()
+    .some((column) => column.name === columnName);
+}
+
+function groupedStatus(db, tableName, statusColumn) {
+  if (!columnExists(db, tableName, statusColumn)) return {};
+  const rows = db.prepare(`
+    SELECT ${statusColumn} AS status, COUNT(*) AS count
+    FROM ${tableName}
+    GROUP BY ${statusColumn}
+    ORDER BY ${statusColumn}
+  `).all();
+  return rows.reduce((result, row) => {
+    result[String(row.status || 'unknown')] = Number(row.count) || 0;
+    return result;
+  }, {});
+}
+
+function latestTimestamp(db, tableName, column) {
+  if (!columnExists(db, tableName, column)) return null;
+  const row = db.prepare(`SELECT MAX(${column}) AS value FROM ${tableName}`).get();
+  return row && row.value ? row.value : null;
+}
+
+function operationalHealth(db) {
+  const providerRuns = groupedStatus(db, 'performance_provider_collection_runs', 'status');
+  const feishuOutbox = groupedStatus(db, 'feishu_bitable_outbox', 'status');
+  const workflowInstances = groupedStatus(db, 'workflow_instances', 'status');
+  const workflowTasks = groupedStatus(db, 'workflow_tasks', 'status');
+  const influencerRows = columnExists(db, 'influencers', 'import_batch')
+    && columnExists(db, 'influencers', 'created_at')
+    ? db.prepare(`
+      SELECT COUNT(*) AS rows, COUNT(DISTINCT import_batch) AS batches,
+        MAX(created_at) AS latest_at
+      FROM influencers
+      WHERE import_batch IS NOT NULL AND trim(import_batch)<>''
+    `).get()
+    : { rows: 0, batches: 0, latest_at: null };
+  const securityEvents = tableExists(db, 'activity_log')
+    ? db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM activity_log
+      WHERE action <> 'admin_operations_read'
+        AND (lower(COALESCE(module,'')) LIKE '%security%'
+        OR lower(action) LIKE '%login%'
+        OR lower(action) LIKE '%password%'
+        OR lower(action) LIKE '%session%'
+        OR lower(action) LIKE '%credential%')
+    `).get().count
+    : 0;
+  return {
+    provider: {
+      status_counts: providerRuns,
+      latest_at: latestTimestamp(db, 'performance_provider_collection_runs', 'completed_at')
+    },
+    feishu: {
+      status_counts: feishuOutbox,
+      latest_at: latestTimestamp(db, 'feishu_bitable_outbox', 'updated_at')
+    },
+    imports: {
+      rows: Number(influencerRows.rows) || 0,
+      batches: Number(influencerRows.batches) || 0,
+      latest_at: influencerRows.latest_at || null
+    },
+    workflow: {
+      instance_status_counts: workflowInstances,
+      task_status_counts: workflowTasks,
+      latest_at: latestTimestamp(db, 'workflow_instances', 'created_at')
+    },
+    security: { event_count: Number(securityEvents) || 0 }
+  };
+}
+
 function createAdminOperationsService(db) {
   if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
     throw new TypeError('A better-sqlite3 database is required.');
@@ -154,7 +235,12 @@ function createAdminOperationsService(db) {
         result_count: events.length,
         next_cursor: nextCursor
       }), options.ipAddress || null);
-      return { events, summary, page: { limit, next_cursor: nextCursor, has_more: hasMore } };
+      return {
+        events,
+        summary,
+        health: operationalHealth(db),
+        page: { limit, next_cursor: nextCursor, has_more: hasMore }
+      };
     }).immediate();
   }
 
@@ -164,5 +250,6 @@ function createAdminOperationsService(db) {
 module.exports = {
   AdminOperationsServiceError,
   createAdminOperationsService,
-  categorySql
+  categorySql,
+  operationalHealth
 };
