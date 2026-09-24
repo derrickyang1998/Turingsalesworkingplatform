@@ -10113,6 +10113,15 @@ function renderAdminOperations(data) {
       return '<div class="stat"><div class="stat-value">' + esc(String(item[1])) + '</div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-help">' + esc(String(item[2])) + '</div></div>';
     }).join('');
   }
+  var organizationHealthEl = document.getElementById('ad_operationsOrganizationHealth');
+  if (organizationHealthEl) {
+    var organizations = Array.isArray(health.organizations) ? health.organizations : [];
+    organizationHealthEl.innerHTML = organizations.length
+      ? '<div class="table-container"><table><thead><tr><th>组织</th><th>Provider</th><th>飞书队列</th><th>导入批次/行</th><th>工作流实例/任务</th></tr></thead><tbody>' + organizations.map(function(organization) {
+        return '<tr><td><strong>' + esc(organization.name || organization.code || ('组织 ' + organization.organization_id)) + '</strong><br><span class="tm-member-access-note">' + esc(organization.code || ('ID ' + organization.organization_id)) + '</span></td><td>' + esc(String(Number(organization.provider_runs) || 0)) + '</td><td>' + esc(String(Number(organization.feishu_outbox) || 0)) + '</td><td>' + esc(String(Number(organization.import_batches) || 0)) + ' / ' + esc(String(Number(organization.import_rows) || 0)) + '</td><td>' + esc(String(Number(organization.workflow_instances) || 0)) + ' / ' + esc(String(Number(organization.workflow_tasks) || 0)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+      : '<p class="tm-member-access-note">暂无组织级运营数据</p>';
+  }
   var events = Array.isArray(data.events) ? data.events : [];
   var listEl = document.getElementById('ad_operationsList');
   if (!listEl) return;

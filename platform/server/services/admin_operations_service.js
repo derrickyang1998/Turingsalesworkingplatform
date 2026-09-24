@@ -116,6 +116,67 @@ function latestTimestamp(db, tableName, column) {
   return row && row.value ? row.value : null;
 }
 
+function countByOrganization(db, tableName) {
+  if (!columnExists(db, tableName, 'org_id')) return {};
+  return db.prepare(`
+    SELECT org_id, COUNT(*) AS count
+    FROM ${tableName}
+    GROUP BY org_id
+  `).all().reduce((result, row) => {
+    result[String(row.org_id)] = Number(row.count) || 0;
+    return result;
+  }, {});
+}
+
+function organizationHealth(db) {
+  if (!tableExists(db, 'organizations')) return [];
+  const organizationColumns = ['id', 'code', 'name'];
+  const availableColumns = organizationColumns.filter((column) => columnExists(db, 'organizations', column));
+  if (!availableColumns.includes('id')) return [];
+  const organizations = db.prepare(`
+    SELECT ${availableColumns.join(',')} FROM organizations ORDER BY id
+  `).all();
+  const provider = countByOrganization(db, 'performance_provider_collection_runs');
+  const feishu = countByOrganization(db, 'feishu_bitable_outbox');
+  const imports = countByOrganization(db, 'influencers');
+  const workflows = countByOrganization(db, 'workflow_instances');
+  const tasks = columnExists(db, 'workflow_tasks', 'org_id')
+    ? countByOrganization(db, 'workflow_tasks')
+    : columnExists(db, 'workflow_tasks', 'instance_id') && columnExists(db, 'workflow_instances', 'org_id')
+      ? db.prepare(`
+        SELECT instance.org_id, COUNT(*) AS count
+        FROM workflow_tasks task
+        JOIN workflow_instances instance ON instance.id=task.instance_id
+        GROUP BY instance.org_id
+      `).all().reduce((result, row) => {
+        result[String(row.org_id)] = Number(row.count) || 0;
+        return result;
+      }, {})
+      : {};
+  const importBatches = columnExists(db, 'influencers', 'org_id') && columnExists(db, 'influencers', 'import_batch')
+    ? db.prepare(`
+      SELECT org_id, COUNT(DISTINCT import_batch) AS count
+      FROM influencers
+      WHERE import_batch IS NOT NULL AND trim(import_batch)<>''
+      GROUP BY org_id
+    `).all().reduce((result, row) => {
+      result[String(row.org_id)] = Number(row.count) || 0;
+      return result;
+    }, {})
+    : {};
+  return organizations.map((organization) => ({
+    organization_id: Number(organization.id),
+    code: organization.code || null,
+    name: organization.name || organization.code || `组织 ${organization.id}`,
+    provider_runs: provider[String(organization.id)] || 0,
+    feishu_outbox: feishu[String(organization.id)] || 0,
+    import_rows: imports[String(organization.id)] || 0,
+    import_batches: importBatches[String(organization.id)] || 0,
+    workflow_instances: workflows[String(organization.id)] || 0,
+    workflow_tasks: tasks[String(organization.id)] || 0
+  }));
+}
+
 function operationalHealth(db) {
   const providerRuns = groupedStatus(db, 'performance_provider_collection_runs', 'status');
   const feishuOutbox = groupedStatus(db, 'feishu_bitable_outbox', 'status');
@@ -161,7 +222,8 @@ function operationalHealth(db) {
       task_status_counts: workflowTasks,
       latest_at: latestTimestamp(db, 'workflow_instances', 'created_at')
     },
-    security: { event_count: Number(securityEvents) || 0 }
+    security: { event_count: Number(securityEvents) || 0 },
+    organizations: organizationHealth(db)
   };
 }
 
@@ -251,5 +313,6 @@ module.exports = {
   AdminOperationsServiceError,
   createAdminOperationsService,
   categorySql,
-  operationalHealth
+  operationalHealth,
+  organizationHealth
 };

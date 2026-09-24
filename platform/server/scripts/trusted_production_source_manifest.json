@@ -392,7 +392,7 @@
     },
     {
       "path": "server/services/admin_operations_service.js",
-      "sha256": "4bc573a84436e97241b4ee1e1a204b3616b7433eb2902e1a5f6216b166531bd0"
+      "sha256": "9f3bfb915149e194925b29f04db63e4cd780d3d9be8793cd28bbe0240c619541"
     },
     {
       "path": "server/services/ai_cost_service.js",
