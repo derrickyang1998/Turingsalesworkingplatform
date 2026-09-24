@@ -5,7 +5,7 @@
 - 管理员运营控制室在既有全局健康摘要下增加按组织的 Provider、飞书 outbox、导入批次/行和工作流实例/任务只读投影，帮助定位具体租户运营状态。
 - 组织级投影只读取固定内部表/字段并保留平台管理员门禁；工作流任务在缺少直接 `org_id` 时通过受信实例归属聚合，不新增写入、迁移或权限绕过。
 - 定向管理员运营、租户目录 UI、路由和受信源码测试 `60/60` 通过；`node --check`、`git diff --check`、`deploy_v8.ps1 -ValidateLocalOnly` 通过。
-- 本轮未执行生产部署、凭据操作或 `derrick` 烟测；GitHub 已同步，线上主机输入仍待配置。
+- 本轮未执行生产部署、凭据操作或 `derrick` 烟测；GitHub 推送因外部网络重置仍待完成，线上主机输入也仍待配置。
 
 ## v0.9.33-ai-audit-fixture-compatibility (Verification ready, 2026-09-24) - AI 审计夹具兼容性修复
 
