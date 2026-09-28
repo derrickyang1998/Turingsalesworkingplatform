@@ -23,7 +23,7 @@ test('schema, sanitizer, trusted source, and deployment registries terminate at 
   }
   assert.match(sanitizer, /STRUCTURAL_COLUMN_POLICY_V31/);
   assert.match(sanitizer, /schemaVersion === 31/);
-  assert.match(sanitizer, /version 6 through version 31/);
+  assert.match(sanitizer, /version 6 through version 32/);
   assert.match(trustedGate, /server\/migrations\/031_organization_billing_statements\.js/);
   for (const file of [
     'server\\migrations\\031_organization_billing_statements.js',

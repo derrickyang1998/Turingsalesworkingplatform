@@ -46,13 +46,13 @@ test('schema, sanitizer, and trusted source registries retain subscription expir
   assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((entry) => entry.version === 28), migration028);
   assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((entry) => entry.version === 28), migration028);
   assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 32);
-  assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 31);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 31);
+  assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 32);
+  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 32);
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
   assert.equal(trusted.migrationContract.targetVersion, 32);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 31);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 32);
 
   for (const requiredPath of [
     'server/migrations/028_subscription_expiry.js',

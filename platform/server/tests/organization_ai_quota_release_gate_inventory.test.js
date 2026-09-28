@@ -70,7 +70,7 @@ test('schema, sanitizer, and trusted source registries retain organization quota
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
   assert.equal(trusted.migrationContract.targetVersion, 32);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 31);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 32);
   for (const requiredPath of [
     'server/migrations/029_organization_monthly_ai_quota.js',
     'server/routes_admin_ai_quota.js',

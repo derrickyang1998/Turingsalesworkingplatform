@@ -49,7 +49,7 @@ test('schema, sanitizer, and trusted-source registries retain token usage migrat
     path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json')
   );
   assert.equal(trusted.migrationContract.targetVersion, 32);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 31);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 32);
   for (const requiredPath of [
     'server/migrations/026_token_usage_tenant_ownership.js',
     'server/services/token_usage_service.js',

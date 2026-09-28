@@ -49,7 +49,8 @@
       28,
       29,
       30,
-      31
+      31,
+      32
     ],
     "targetVersion": 32,
     "runs": 2,
@@ -292,11 +293,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "f258290ae2075bc11a7b18ec82201b1eaa678f17f9d81127dc50a728aff71a85"
+      "sha256": "bd585d32e06de7549c76d2099a93524f84f90ab67622c5fc7b59c439d072af79"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "81467e223ed0f19cd09a5447dc6571de763516bab9a231d25c8d527b08f4d933"
+      "sha256": "a4a98782dfaece627b284fb3f28f88a7f5d5003fd21dbd8b8071c2a4f27bcb8a"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -320,7 +321,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "6963bb9d05df9d993ef2f760081bf906976cc9e77b5c9320dd5bc6adf5c29013"
+      "sha256": "9ed9caaa9898624cdd0a6b4754e8794cabd7e143491183618527a90b7e6aaafd"
     },
     {
       "path": "server/routes.js",
@@ -396,7 +397,7 @@
     },
     {
       "path": "server/services/admin_operations_service.js",
-        "sha256": "2f4c6fb384466c36b1a5189a41082b3e700788c430301e72b7a9b77cef5056ca"
+      "sha256": "2f4c6fb384466c36b1a5189a41082b3e700788c430301e72b7a9b77cef5056ca"
     },
     {
       "path": "server/services/ai_cost_service.js",

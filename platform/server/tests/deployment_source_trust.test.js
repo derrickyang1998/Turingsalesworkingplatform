@@ -436,7 +436,7 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
     targetVersion: 32,
     runs: 2,
     deterministicAppendTables: ['activity_log']

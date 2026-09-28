@@ -1114,7 +1114,7 @@ test('schema v31 sanitizer rebuilds organization billing statement digests', () 
   }
 });
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v31 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v32 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1144,7 +1144,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v31Fixture = migratedFixture('manifest-v31-isolated', 31);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'deterministic rank bucket preserving null/equality/cardinality'
@@ -2680,7 +2680,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v31', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v32', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
