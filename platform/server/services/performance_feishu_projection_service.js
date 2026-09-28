@@ -2,6 +2,7 @@
 
 const MAX_PROJECTION_RECORDS = 5000;
 const CONTRACT_VERSION = 'performance-feishu-projection-preview-v1';
+const { TARGET_KINDS } = require('./performance_feishu_contract');
 
 class PerformanceFeishuProjectionServiceError extends Error {
   constructor(statusCode, code, message, details) {
@@ -80,19 +81,7 @@ function createPerformanceFeishuProjectionService(options = {}) {
     return items;
   }
 
-  function preview(input = {}) {
-    const connection = feishuConnectionService.getConnection({
-      userId: input.userId,
-      campaignId: input.campaignId
-    });
-    if (!connection || !connection.capabilities || connection.capabilities.can_manage !== true) {
-      throw projectionError(403, 'PERFORMANCE_FEISHU_PROJECTION_FORBIDDEN', 'Feishu performance snapshot export is not available.');
-    }
-    const configuration = connection.active_configuration;
-    if (!configuration || configuration.status !== 'approved' || !configuration.field_mapping) {
-      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_CONFIGURATION_REQUIRED', 'An approved Feishu field mapping is required.');
-    }
-
+  function buildProjection(input, configuration, targetKind) {
     const mappingEntries = Object.entries(configuration.field_mapping)
       .sort(([left], [right]) => left.localeCompare(right));
     const columns = mappingEntries.map(([, targetField]) => targetField);
@@ -112,15 +101,17 @@ function createPerformanceFeishuProjectionService(options = {}) {
     const generatedAt = now().toISOString();
     return {
       contract_version: CONTRACT_VERSION,
-      campaign_id: Number(connection.campaign_id || input.campaignId),
+      campaign_id: Number(input.campaignId),
       configuration: {
         id: Number(configuration.id),
         version: Number(configuration.version),
         status: configuration.status
       },
       target: {
-        kind: configuration.daily_snapshot_table_id ? 'daily_snapshot' : 'current_state',
-        configured: Boolean(configuration.daily_snapshot_table_id || configuration.current_table_id)
+        kind: targetKind,
+        configured: Boolean(targetKind === 'daily_snapshot'
+          ? configuration.daily_snapshot_table_id
+          : configuration.current_table_id)
       },
       snapshot: {
         generated_at: generatedAt,
@@ -131,6 +122,63 @@ function createPerformanceFeishuProjectionService(options = {}) {
       },
       columns,
       records
+    };
+  }
+
+  function preview(input = {}) {
+    const connection = feishuConnectionService.getConnection({
+      userId: input.userId,
+      campaignId: input.campaignId
+    });
+    if (!connection || !connection.capabilities || connection.capabilities.can_manage !== true) {
+      throw projectionError(403, 'PERFORMANCE_FEISHU_PROJECTION_FORBIDDEN', 'Feishu performance snapshot export is not available.');
+    }
+    const configuration = connection.active_configuration;
+    if (!configuration || configuration.status !== 'approved' || !configuration.field_mapping) {
+      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_CONFIGURATION_REQUIRED', 'An approved Feishu field mapping is required.');
+    }
+    const targetKind = configuration.daily_snapshot_table_id ? 'daily_snapshot' : 'current_state';
+    const result = buildProjection(input, configuration, targetKind);
+    result.campaign_id = Number(connection.campaign_id || input.campaignId);
+    result.target.configured = Boolean(configuration.daily_snapshot_table_id || configuration.current_table_id);
+    return result;
+  }
+
+  function prepareDelivery(input = {}) {
+    if (!feishuConnectionService || typeof feishuConnectionService.getDeliveryConfiguration !== 'function') {
+      throw projectionError(503, 'PERFORMANCE_FEISHU_PROJECTION_DELIVERY_UNAVAILABLE', 'Performance Feishu delivery is unavailable.');
+    }
+    const targetKind = input.targetKind || 'current_state';
+    if (!TARGET_KINDS.includes(targetKind)) {
+      throw projectionError(400, 'PERFORMANCE_FEISHU_PROJECTION_TARGET_INVALID', 'The performance Feishu target is invalid.');
+    }
+    const configuration = feishuConnectionService.getDeliveryConfiguration({
+      userId: input.userId,
+      campaignId: input.campaignId
+    });
+    if (!configuration || configuration.status !== 'approved' || !configuration.field_mapping) {
+      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_CONFIGURATION_REQUIRED', 'An approved Feishu field mapping is required.');
+    }
+    if (targetKind === 'daily_snapshot' && !configuration.daily_snapshot_table_id) {
+      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_TARGET_NOT_CONFIGURED', 'A daily snapshot table is not configured.');
+    }
+    const result = buildProjection(input, configuration, targetKind);
+    if (result.snapshot.record_count < 1) {
+      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_NO_OBSERVED_RECORDS', 'No observed performance rows are available for Feishu delivery.');
+    }
+    const requiredFields = [
+      configuration.field_mapping['content.original_url'],
+      configuration.field_mapping['latest_observation.observed_at']
+    ];
+    if (result.records.some((record) => requiredFields.some((field) => !Object.hasOwn(record.fields, field)))) {
+      throw projectionError(409, 'PERFORMANCE_FEISHU_PROJECTION_REQUIRED_FIELD_MISSING', 'A video link and observation time are required for Feishu delivery.');
+    }
+    return {
+      target_kind: targetKind,
+      configuration,
+      records: result.records,
+      snapshot: result.snapshot,
+      columns: result.columns
     };
   }
 
@@ -148,7 +196,7 @@ function createPerformanceFeishuProjectionService(options = {}) {
     };
   }
 
-  return Object.freeze({ preview, exportCsv });
+  return Object.freeze({ preview, prepareDelivery, exportCsv });
 }
 
 module.exports = {

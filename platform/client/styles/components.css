@@ -1435,6 +1435,76 @@ thead th {
   gap: var(--tm-space-2);
 }
 
+.tm-performance-feishu-delivery-panel {
+  display: grid;
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-feishu-delivery-intro p,
+.tm-performance-feishu-delivery-history h4 {
+  margin: 0;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tm-performance-feishu-delivery-actions,
+.tm-performance-feishu-delivery-retry,
+.tm-performance-feishu-delivery-reconcile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--tm-space-2);
+}
+
+.tm-performance-feishu-delivery-history {
+  display: grid;
+  gap: var(--tm-space-2);
+}
+
+.tm-performance-feishu-delivery-row {
+  display: grid;
+  gap: var(--tm-space-2);
+  padding: var(--tm-space-2) 0;
+  border-top: 1px solid var(--tm-color-border);
+  color: var(--tm-color-text);
+  font-size: 12px;
+}
+
+.tm-performance-feishu-delivery-row > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--tm-space-2);
+}
+
+.tm-performance-feishu-delivery-status {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tm-performance-feishu-delivery-status-succeeded { color: var(--tm-color-success); }
+.tm-performance-feishu-delivery-status-failed { color: var(--tm-color-danger); }
+.tm-performance-feishu-delivery-status-pending { color: var(--tm-color-warning); }
+
+.tm-performance-feishu-delivery-meta {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+}
+
+.tm-performance-feishu-delivery-retry input,
+.tm-performance-feishu-delivery-reconcile textarea {
+  min-width: 220px;
+  font-size: 12px;
+}
+
+.tm-performance-feishu-delivery-reconcile label {
+  display: grid;
+  gap: var(--tm-space-1);
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+}
+
 .tm-performance-integration-layout {
   display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);

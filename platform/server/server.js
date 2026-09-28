@@ -144,6 +144,8 @@ const {
 const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const { createPerformanceFeishuProjectionService } = require('./services/performance_feishu_projection_service');
+const { createFeishuClient } = require('./feishu_client');
+const { createFeishuBitableOutboxService } = require('./services/feishu_bitable_outbox_service');
 const { createPerformanceCollectionRunService } = require('./services/performance_collection_run_service');
 const { createPerformanceFreshnessService } = require('./services/performance_freshness_service');
 const { createYouTubeDataApiClient } = require('./services/youtube_data_api_client');
@@ -335,7 +337,11 @@ const customerReportDeliveryService = createCustomerReportDeliveryService(db, {
     }
   }
 });
-const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db);
+const performanceFeishuClient = createFeishuClient();
+const performanceFeishuBitableOutboxService = createFeishuBitableOutboxService(db);
+const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db, {
+  getExternalSyncStatus: performanceFeishuClient.getPerformanceStatus
+});
 const performanceFeishuProjectionService = createPerformanceFeishuProjectionService({
   performanceService: performanceManualService,
   feishuConnectionService: performanceFeishuConnectionService
@@ -2342,12 +2348,15 @@ registerSubscriptionExpiryRoutes(app, db, {
 registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,
+  db,
   service: performanceManualService,
   freshnessService: performanceFreshnessService,
   collectionRunService: performanceCollectionRunService,
   providerCollectionService: performanceProviderCollectionService,
   feishuConnectionService: performanceFeishuConnectionService,
   feishuProjectionService: performanceFeishuProjectionService,
+  feishuClient: performanceFeishuClient,
+  feishuBitableOutboxService: performanceFeishuBitableOutboxService,
   aiReviewService: performanceAiReviewService,
   contentAnalysisService: performanceContentAnalysisService,
   organizationMethodologyService,

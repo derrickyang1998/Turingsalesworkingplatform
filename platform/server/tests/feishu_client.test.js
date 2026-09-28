@@ -5,6 +5,7 @@ const {
   createFeishuClient,
   FeishuClientError
 } = require('../feishu_client');
+const { decorateRecords, DELIVERY_CONTEXT_FIELD } = require('../services/performance_feishu_contract');
 
 function environment(overrides) {
   return Object.assign({
@@ -61,6 +62,152 @@ test('Feishu client reports unconfigured state without exposing configuration va
     missing: ['FEISHU_WEBHOOK_URL_OR_BITABLE_CONFIG']
   });
   assert.doesNotMatch(JSON.stringify(client.getStatus()), /secret|token|https?:/i);
+});
+
+test('Feishu client exposes a credential-free performance Bitable capability status', () => {
+  const client = createFeishuClient({ env: environment() });
+
+  assert.deepEqual(client.getPerformanceStatus(), {
+    enabled: false,
+    mode: 'performance_bitable',
+    missing: ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_PERFORMANCE_BITABLE_WRITE_ENABLED']
+  });
+  assert.doesNotMatch(JSON.stringify(client.getPerformanceStatus()), /test-secret|tenant-test-token|https?:/i);
+});
+
+test('Feishu client writes an approved performance daily snapshot to the configured target table', async () => {
+  const calls = [];
+  const client = createFeishuClient({
+    env: environment({
+      FEISHU_APP_ID: 'cli_test_app',
+      FEISHU_APP_SECRET: 'test-secret',
+      FEISHU_PERFORMANCE_BITABLE_WRITE_ENABLED: 'true'
+    }),
+    fetchImpl: async function(url, options) {
+      calls.push({ url, options });
+      if (calls.length === 1) return okResponse({ code: 0, tenant_access_token: 'tenant-performance-token' });
+      if (calls.length === 2) return bitableFieldsResponse(['视频链接', '观测时间']);
+      return okResponse({ code: 0, data: { records: [{ record_id: 'rec_performance_1' }] } });
+    }
+  });
+  const configuration = {
+    id: 11,
+    version: 2,
+    status: 'approved',
+    bitable_app_token: 'basc_perf',
+    current_table_id: 'tbl_current',
+    daily_snapshot_table_id: 'tbl_daily',
+    field_mapping: {
+      'content.original_url': '视频链接',
+      'latest_observation.observed_at': '观测时间'
+    }
+  };
+  const records = decorateRecords([{ fields: {
+    视频链接: 'https://example.test/video',
+    观测时间: '2026-09-28T00:00:00.000Z'
+  } }], {
+    schema_version: 1,
+    configuration_id: 11,
+    configuration_version: 2,
+    target_kind: 'daily_snapshot'
+  });
+
+  const result = await client.syncPerformanceSnapshot({
+    configuration,
+    records,
+    operationId: 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5',
+    targetKind: 'daily_snapshot'
+  });
+
+  assert.deepEqual(result, {
+    configured: true,
+    mode: 'bitable',
+    target_kind: 'daily_snapshot',
+    synced: 1,
+    records: 1,
+    remoteRecordIds: ['rec_performance_1']
+  });
+  assert.match(calls[1].url, /\/bitable\/v1\/apps\/basc_perf\/tables\/tbl_daily\/fields\?page_size=100$/);
+  assert.match(calls[2].url, /\/bitable\/v1\/apps\/basc_perf\/tables\/tbl_daily\/records\/batch_create$/);
+  const body = JSON.parse(calls[2].options.body);
+  assert.equal(body.client_token, 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5');
+  assert.deepEqual(body.records[0].fields, {
+    视频链接: 'https://example.test/video',
+    观测时间: '2026-09-28T00:00:00.000Z'
+  });
+  assert.equal(Object.hasOwn(body.records[0].fields, DELIVERY_CONTEXT_FIELD), false);
+  assert.doesNotMatch(JSON.stringify(result), /test-secret|tenant-performance-token|basc_perf|tbl_daily/i);
+});
+
+test('Feishu client upserts an existing performance current-state row instead of creating a duplicate', async () => {
+  const calls = [];
+  const client = createFeishuClient({
+    env: environment({
+      FEISHU_APP_ID: 'cli_test_app',
+      FEISHU_APP_SECRET: 'test-secret',
+      FEISHU_PERFORMANCE_BITABLE_WRITE_ENABLED: 'true'
+    }),
+    fetchImpl: async function(url, options) {
+      calls.push({ url, options });
+      if (calls.length === 1) return okResponse({ code: 0, tenant_access_token: 'tenant-performance-token' });
+      if (calls.length === 2) return bitableFieldsResponse(['视频链接', '观测时间', '播放量']);
+      if (calls.length === 3) {
+        return okResponse({ code: 0, data: { items: [{ record_id: 'rec_existing' }] } });
+      }
+      return okResponse({ code: 0, data: { record: { record_id: 'rec_existing' } } });
+    }
+  });
+  const configuration = {
+    id: 12,
+    version: 3,
+    status: 'approved',
+    bitable_app_token: 'basc_perf',
+    current_table_id: 'tbl_current',
+    daily_snapshot_table_id: 'tbl_daily',
+    field_mapping: {
+      'content.original_url': '视频链接',
+      'latest_observation.observed_at': '观测时间',
+      'latest_observation.views': '播放量'
+    }
+  };
+  const records = decorateRecords([{ fields: {
+    视频链接: 'https://example.test/video',
+    观测时间: '2026-09-28T00:00:00.000Z',
+    播放量: 1234
+  } }], {
+    schema_version: 1,
+    configuration_id: 12,
+    configuration_version: 3,
+    target_kind: 'current_state'
+  });
+
+  const result = await client.syncPerformanceSnapshot({
+    configuration,
+    records,
+    operationId: 'e4bf7aa0-3b47-44b0-8c77-8a268d1c93ae',
+    targetKind: 'current_state'
+  });
+
+  assert.deepEqual(result, {
+    configured: true,
+    mode: 'bitable',
+    target_kind: 'current_state',
+    synced: 1,
+    records: 1,
+    remoteRecordIds: ['rec_existing']
+  });
+  assert.equal(calls.length, 4);
+  assert.match(calls[2].url, /\/bitable\/v1\/apps\/basc_perf\/tables\/tbl_current\/records\/search$/);
+  assert.equal(calls[2].options.method, 'POST');
+  assert.match(calls[3].url, /\/bitable\/v1\/apps\/basc_perf\/tables\/tbl_current\/records\/rec_existing$/);
+  assert.equal(calls[3].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[3].options.body), {
+    fields: {
+      视频链接: 'https://example.test/video',
+      观测时间: '2026-09-28T00:00:00.000Z',
+      播放量: 1234
+    }
+  });
 });
 
 test('Feishu client detects incomplete Bitable configuration without falling back to an ambiguous provider', () => {

@@ -22,6 +22,7 @@ const SAFE_RETRY_FAILURE_CODES = new Set([
   'FEISHU_OUTBOX_RECORDS_INVALID',
   'FEISHU_OUTBOX_PAYLOAD_TOO_LARGE'
 ]);
+const PERFORMANCE_CONTEXT_MARKER = '__turingmarket_feishu_performance_context';
 
 class FeishuBitableOutboxError extends Error {
   constructor(statusCode, code, message) {
@@ -456,7 +457,7 @@ function createFeishuBitableOutboxService(db) {
     })();
   }
 
-  function list(options) {
+  function listDeliveries(options, performanceOnly) {
     options = options || {};
     const userId = positiveInteger(options.userId);
     const campaignId = positiveInteger(options.campaignId);
@@ -466,6 +467,10 @@ function createFeishuBitableOutboxService(db) {
       throw error(400, 'FEISHU_OUTBOX_REQUEST_INVALID', 'Feishu Bitable delivery request is invalid.');
     }
     const access = requireCampaignRead(db, userId, campaignId);
+    const where = performanceOnly ? ' AND instr(delivery.payload_json, ?) > 0' : '';
+    const parameters = [access.organization.id, campaignId];
+    if (performanceOnly) parameters.push(PERFORMANCE_CONTEXT_MARKER);
+    parameters.push(limit);
     return db.prepare(`
       SELECT delivery.*,
         retry_source.failed_delivery_id AS retry_of_delivery_id,
@@ -475,13 +480,21 @@ function createFeishuBitableOutboxService(db) {
         ON retry_source.retry_delivery_id=delivery.id
       LEFT JOIN feishu_bitable_outbox_retries retry_child
         ON retry_child.failed_delivery_id=delivery.id
-      WHERE delivery.org_id=? AND delivery.campaign_id=?
+      WHERE delivery.org_id=? AND delivery.campaign_id=?${where}
       ORDER BY delivery.updated_at DESC,delivery.id DESC
       LIMIT ?
-    `).all(access.organization.id, campaignId, limit).map(publicDelivery);
+    `).all(...parameters).map(publicDelivery);
   }
 
-  return Object.freeze({ reserve, complete, fail, retry, reconcile, list });
+  function list(options) {
+    return listDeliveries(options, false);
+  }
+
+  function listPerformance(options) {
+    return listDeliveries(options, true);
+  }
+
+  return Object.freeze({ reserve, complete, fail, retry, reconcile, list, listPerformance });
 }
 
 module.exports = {

@@ -10,6 +10,7 @@ const {
   FeishuBitableOutboxError,
   createFeishuBitableOutboxService
 } = require('../services/feishu_bitable_outbox_service');
+const { DELIVERY_CONTEXT_FIELD } = require('../services/performance_feishu_contract');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATIONS = Object.freeze([
@@ -351,4 +352,42 @@ test('campaign-scoped Bitable outbox retries a known no-write failure through a 
     actor_user_id: owner.user_id,
     reason: 'Schema mapping was corrected before retrying this batch.'
   }]);
+});
+
+test('performance delivery listing excludes influencer payloads while retaining retry lineage', (t) => {
+  const db = openDatabase(t);
+  const owner = identity(db, 2);
+  const campaignId = createCampaign(db, owner, 8501, 'Bitable performance listing');
+  const service = createFeishuBitableOutboxService(db);
+  const performanceRecords = [{
+    fields: {
+      视频链接: 'https://example.test/performance',
+      [DELIVERY_CONTEXT_FIELD]: JSON.stringify({
+        schema_version: 1,
+        configuration_id: 11,
+        configuration_version: 2,
+        target_kind: 'current_state'
+      })
+    }
+  }];
+  const performance = service.reserve({
+    userId: owner.user_id,
+    campaignId,
+    operationId: '71d91d9a-3d19-4f4f-8da5-d80af7be11dd',
+    records: performanceRecords
+  });
+  service.complete({
+    deliveryId: performance.delivery.id,
+    reservationToken: performance.reservationToken,
+    remoteRecordIds: ['rec_performance']
+  });
+  const influencer = service.reserve({
+    userId: owner.user_id,
+    campaignId,
+    operationId: '5a8935af-78af-45c6-a0cd-ff4d7f1e1b0b',
+    records: DELIVERY_RECORDS.slice(0, 1)
+  });
+
+  assert.deepEqual(service.listPerformance({ userId: owner.user_id, campaignId, limit: 50 }).map((row) => row.id), [performance.delivery.id]);
+  assert.deepEqual(service.list({ userId: owner.user_id, campaignId, limit: 50 }).map((row) => row.id), [influencer.delivery.id, performance.delivery.id]);
 });

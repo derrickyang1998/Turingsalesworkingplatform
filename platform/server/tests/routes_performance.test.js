@@ -221,6 +221,28 @@ function createFixture(options = {}) {
       };
     }
   };
+  const feishuDeliveryService = options.feishuDeliveryService || {
+    async sync(input) {
+      calls.push(['feishu-sync', input]);
+      return {
+        statusCode: 200,
+        body: { configured: false, delivery: { id: 51, status: 'failed' } }
+      };
+    },
+    async retry(input) {
+      calls.push(['feishu-retry', input]);
+      return {
+        statusCode: 200,
+        body: { configured: true, delivery: { id: 52, status: 'succeeded' } }
+      };
+    }
+  };
+  const feishuBitableOutboxService = options.feishuBitableOutboxService || {
+    listPerformance(input) {
+      calls.push(['feishu-performance-deliveries', input]);
+      return [{ id: 51, campaign_id: 7, status: 'succeeded', record_count: 1, remote_record_count: 1 }];
+    }
+  };
   const aiReviewService = {
     async createDraft(input) {
       calls.push(['ai-review-draft', input]);
@@ -376,6 +398,8 @@ function createFixture(options = {}) {
     providerCollectionService,
     feishuConnectionService,
     feishuProjectionService,
+    feishuDeliveryService,
+    feishuBitableOutboxService,
     aiReviewService,
     contentAnalysisService,
     organizationMethodologyService,
@@ -394,6 +418,8 @@ function createFixture(options = {}) {
     providerCollectionService,
     feishuConnectionService,
     feishuProjectionService,
+    feishuDeliveryService,
+    feishuBitableOutboxService,
     aiReviewService,
     contentAnalysisService,
     organizationMethodologyService,
@@ -452,6 +478,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId',
     'GET /api/campaigns/:id/performance/dashboard',
     'GET /api/campaigns/:id/performance/feishu-connection',
+    'GET /api/campaigns/:id/performance/feishu-deliveries',
     'GET /api/campaigns/:id/performance/feishu-projection-preview',
     'GET /api/campaigns/:id/performance/feishu-projection-preview/export',
     'GET /api/campaigns/:id/performance/freshness-queue',
@@ -470,6 +497,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt',
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
+    'POST /api/campaigns/:id/performance/feishu-deliveries/:deliveryId/retry',
+    'POST /api/campaigns/:id/performance/feishu-sync',
     'POST /api/campaigns/:id/performance/import',
     'POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve',
     'POST /api/campaigns/:id/performance/methodology-promotion-requests',
@@ -491,6 +520,48 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     userId: 9,
     campaignId: '7',
     body: request.body
+  }]);
+});
+
+test('routes performance Feishu sync and explicit retry with campaign and idempotency context', async () => {
+  const { routes, calls } = createFixture();
+  const syncResponse = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/feishu-sync'),
+    {
+      user: { id: 9 },
+      params: { id: '7' },
+      body: { snapshot_kind: 'daily_snapshot' },
+      headers: { 'idempotency-key': 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5' },
+      requestId: 'performance-feishu-sync-request'
+    }
+  );
+  assert.equal(syncResponse.statusCode, 200);
+  assert.equal(syncResponse.body.request_id, 'performance-feishu-sync-request');
+  assert.deepEqual(calls.shift(), ['feishu-sync', {
+    userId: 9,
+    campaignId: '7',
+    body: { snapshot_kind: 'daily_snapshot' },
+    operationId: 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5'
+  }]);
+
+  const retryResponse = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/feishu-deliveries/:deliveryId/retry'),
+    {
+      user: { id: 9 },
+      params: { id: '7', deliveryId: '51' },
+      body: { reason: '已核对飞书未产生重复记录' },
+      headers: { 'idempotency-key': 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5' },
+      requestId: 'performance-feishu-retry-request'
+    }
+  );
+  assert.equal(retryResponse.statusCode, 200);
+  assert.equal(retryResponse.body.request_id, 'performance-feishu-retry-request');
+  assert.deepEqual(calls.shift(), ['feishu-retry', {
+    userId: 9,
+    campaignId: '7',
+    deliveryId: '51',
+    reason: '已核对飞书未产生重复记录',
+    operationId: 'd6c42da2-1c45-45db-9cbe-1bd06d5250b5'
   }]);
 });
 
@@ -782,6 +853,24 @@ test('previews and exports the approved Feishu performance projection', () => {
       record_count: 1,
       ip_address: null
     }]
+  ]);
+});
+
+test('lists only performance Feishu delivery receipts through the campaign performance contract', () => {
+  const fixture = createFixture();
+  const response = invoke(fixture.routes.get('GET /api/campaigns/:id/performance/feishu-deliveries'), {
+    params: { id: '7' },
+    query: { limit: '10' },
+    user: { id: 9 },
+    requestId: 'performance-delivery-list-request'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.request_id, 'performance-delivery-list-request');
+  assert.equal(response.body.deliveries[0].id, 51);
+  assert.deepEqual(fixture.calls.find(([name]) => name === 'feishu-performance-deliveries'), [
+    'feishu-performance-deliveries',
+    { userId: 9, campaignId: '7', limit: '10' }
   ]);
 });
 

@@ -249,7 +249,7 @@
     },
     {
       "path": "server/feishu_client.js",
-      "sha256": "88504e378b1aa083d02fdbe46ec7885591a44a5ec5abe28455ec38b679d7709c"
+      "sha256": "18f6fca0a1d89640b53b4a560c847a7fab4a5563dcec58cdd4a532bd4fa0af29"
     },
     {
       "path": "server/middleware/phase4_request_pipeline.js",
@@ -377,7 +377,7 @@
     },
     {
       "path": "server/routes_performance.js",
-      "sha256": "063ac49f9d7f4a5aedc1b3b9a3b71004aadac8e834f5858b78f2ebc904d365b4"
+      "sha256": "2ecf5f0a7633e3a67caabf798533544a77c98d12cd5324b230fdb6427b3721c3"
     },
     {
       "path": "server/routes_workflow.js",
@@ -385,7 +385,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "2720b63ad9d131726de3229627fba6736c30fdda0853fe8abb6ad38cb8a546ea"
+      "sha256": "0f63ed70e7c121c27898b54dccaa18a8205809b800ae457c2cfe17786a71ca0d"
     },
     {
       "path": "server/workflow_engine.js",
@@ -485,7 +485,7 @@
     },
     {
       "path": "server/services/feishu_bitable_outbox_service.js",
-      "sha256": "ff0b4eeef26f6e6b1edfbedf89ee619ccb5d772cc583aae1b4aaed93f4c2a17c"
+      "sha256": "8f66b5a595eac6377165385a40c30f39b9fae6c5411cbed83f347e3103ae040b"
     },
     {
       "path": "server/services/idempotency_service.js",
@@ -577,11 +577,11 @@
     },
     {
       "path": "server/services/performance_feishu_connection_service.js",
-      "sha256": "23e015160af51e41ecc9e210160790b898b15fdf6c95baa4e92db2dacb473812"
+      "sha256": "73602c1c96daa0a410b09f08345c79aef54cd3b2f03149413749145ddbccadc1"
     },
     {
       "path": "server/services/performance_feishu_projection_service.js",
-      "sha256": "3ba681eb374b52a8cfbadbd09dc74ca498a94baff99a01fbc215a6d8116e7246"
+      "sha256": "831fe1a8804478c7358f53011569f74135ce0fcf183562a6a38b27fa6b179183"
     },
     {
       "path": "server/services/performance_freshness_service.js",
@@ -654,6 +654,14 @@
     {
       "path": "server/systemd/turingmarket-parser@.service",
       "sha256": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a"
+    },
+    {
+      "path": "server/services/performance_feishu_contract.js",
+      "sha256": "32b139477653881e74719ae262d397bc1ae8330b408e812936305a1798f48c8d"
+    },
+    {
+      "path": "server/services/performance_feishu_delivery_service.js",
+      "sha256": "f8f4dbc565f52ac317d5567f721fbd712d15c8dd399728f821edefb886114d0d"
     }
   ]
 }

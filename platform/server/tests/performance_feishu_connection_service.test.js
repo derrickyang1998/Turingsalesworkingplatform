@@ -16,7 +16,7 @@ const {
   createPerformanceFeishuConnectionService
 } = require('../services/performance_feishu_connection_service');
 
-function createFixture() {
+function createFixture(options = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   db.exec(`
@@ -71,7 +71,10 @@ function createFixture() {
 
   return {
     db,
-    service: createPerformanceFeishuConnectionService(db, { getCampaignAccess })
+    service: createPerformanceFeishuConnectionService(db, {
+      getCampaignAccess,
+      getExternalSyncStatus: options.getExternalSyncStatus
+    })
   };
 }
 
@@ -221,6 +224,59 @@ test('database protects configured projection history from arbitrary mutation or
     assert.throws(() => db.prepare(
       'DELETE FROM performance_feishu_projection_configs WHERE id=?'
     ).run(draft.configuration.id), /append-only|cannot delete/i);
+  } finally {
+    db.close();
+  }
+});
+
+test('returns the exact approved or superseded configuration only to an organization administrator for server-side delivery', () => {
+  const { db, service } = createFixture();
+  try {
+    const draft = service.createDraft({ userId: 1, campaignId: 7, body: draftBody() });
+    service.approveDraft({ userId: 2, campaignId: 7, configurationId: draft.configuration.id });
+
+    const configuration = service.getDeliveryConfiguration({
+      userId: 2,
+      campaignId: 7,
+      configurationId: draft.configuration.id
+    });
+    assert.deepEqual(configuration, {
+      id: draft.configuration.id,
+      version: 1,
+      status: 'approved',
+      bitable_app_token: 'bascnPerformanceApp',
+      current_table_id: 'tblCurrentState',
+      daily_snapshot_table_id: 'tblDailySnapshot',
+      field_mapping: draftBody().field_mapping
+    });
+    assert.throws(() => service.getDeliveryConfiguration({
+      userId: 1,
+      campaignId: 7,
+      configurationId: draft.configuration.id
+    }), (error) => (
+      error instanceof PerformanceFeishuConnectionServiceError &&
+      error.code === 'PERFORMANCE_FEISHU_CONNECTION_APPROVAL_FORBIDDEN'
+    ));
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('reflects the configured Feishu performance capability without exposing provider credentials', () => {
+  const { db, service } = createFixture({
+    getExternalSyncStatus: () => ({ enabled: true, mode: 'performance_bitable', missing: [] })
+  });
+  try {
+    const draft = service.createDraft({ userId: 1, campaignId: 7, body: draftBody() });
+    const approved = service.approveDraft({ userId: 2, campaignId: 7, configurationId: draft.configuration.id });
+
+    assert.equal(approved.external_sync.enabled, true);
+    assert.equal(approved.external_sync.reason, 'ready');
+    assert.equal(approved.capabilities.external_sync_enabled, true);
+    assert.equal(approved.active_configuration.external_sync.enabled, true);
+    assert.equal(Object.hasOwn(approved.external_sync, 'bitable_app_token'), false);
+    assert.doesNotMatch(JSON.stringify(approved.external_sync), /bascnPerformanceApp|tblCurrentState/i);
   } finally {
     db.close();
   }

@@ -159,16 +159,21 @@ function parseMapping(value) {
   }
 }
 
-function publicExternalSyncState() {
+function publicExternalSyncState(getExternalSyncStatus) {
+  const status = typeof getExternalSyncStatus === 'function'
+    ? getExternalSyncStatus()
+    : null;
+  const enabled = Boolean(status && status.enabled === true);
   return Object.freeze({
-    enabled: false,
-    reason: 'not_enabled_in_this_release',
+    enabled,
+    reason: enabled ? 'ready' : (status && Array.isArray(status.missing) && status.missing.length ? 'not_configured' : 'not_enabled_in_this_release'),
+    missing: status && Array.isArray(status.missing) ? status.missing.slice() : [],
     read_attempted: false,
     write_attempted: false
   });
 }
 
-function serializeConfiguration(row, includeSensitive) {
+function serializeConfiguration(row, includeSensitive, getExternalSyncStatus) {
   if (!row) return null;
   const result = {
     id: Number(row.id),
@@ -177,7 +182,7 @@ function serializeConfiguration(row, includeSensitive) {
     created_at: row.created_at,
     approved_at: row.approved_at || null,
     superseded_at: row.superseded_at || null,
-    external_sync: publicExternalSyncState()
+    external_sync: publicExternalSyncState(getExternalSyncStatus)
   };
   if (includeSensitive) {
     result.bitable_app_token = row.bitable_app_token;
@@ -191,6 +196,7 @@ function serializeConfiguration(row, includeSensitive) {
 function createPerformanceFeishuConnectionService(db, options = {}) {
   if (!db || typeof db.prepare !== 'function') throw new TypeError('A SQLite database is required.');
   const getCampaignAccess = options.getCampaignAccess || defaultGetCampaignAccess;
+  const getExternalSyncStatus = options.getExternalSyncStatus;
 
   function requireAccess(userIdValue, campaignIdValue, mode) {
     const userId = positiveInteger(userIdValue);
@@ -245,19 +251,46 @@ function createPerformanceFeishuConnectionService(db, options = {}) {
     `).get(context.orgId, context.campaignId) : null;
     return {
       campaign_id: context.campaignId,
-      active_configuration: serializeConfiguration(active, context.canManage),
-      draft_configuration: context.canManage ? serializeConfiguration(draft, true) : null,
+      active_configuration: serializeConfiguration(active, context.canManage, getExternalSyncStatus),
+      draft_configuration: context.canManage ? serializeConfiguration(draft, true, getExternalSyncStatus) : null,
       capabilities: {
         can_manage: context.canManage,
         can_approve: context.canApprove,
-        external_sync_enabled: false
+        external_sync_enabled: publicExternalSyncState(getExternalSyncStatus).enabled
       },
-      external_sync: publicExternalSyncState()
+      external_sync: publicExternalSyncState(getExternalSyncStatus)
     };
   }
 
   function getConnection(input) {
     return stateFor(requireAccess(input && input.userId, input && input.campaignId, 'view'));
+  }
+
+  function getDeliveryConfiguration(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'approve');
+    const configurationId = input && input.configurationId === undefined
+      ? null
+      : positiveInteger(input && input.configurationId);
+    const row = configurationId === null
+      ? db.prepare(`
+          SELECT * FROM performance_feishu_projection_configs
+          WHERE org_id=? AND campaign_id=? AND status='approved'
+          ORDER BY version DESC,id DESC
+          LIMIT 1
+        `).get(context.orgId, context.campaignId)
+      : readRow(context.orgId, context.campaignId, configurationId);
+    if (!row || !['approved', 'superseded'].includes(row.status)) {
+      throw serviceError(409, 'PERFORMANCE_FEISHU_CONNECTION_NOT_APPROVED', 'An approved Feishu performance configuration is required.');
+    }
+    return {
+      id: Number(row.id),
+      version: Number(row.version),
+      status: row.status,
+      bitable_app_token: row.bitable_app_token,
+      current_table_id: row.current_table_id,
+      daily_snapshot_table_id: row.daily_snapshot_table_id || null,
+      field_mapping: parseMapping(row.field_mapping_json)
+    };
   }
 
   function createDraft(input) {
@@ -293,7 +326,7 @@ function createPerformanceFeishuConnectionService(db, options = {}) {
       version: Number(row.version)
     });
     const state = stateFor(context);
-    return Object.assign(state, { configuration: serializeConfiguration(row, true) });
+    return Object.assign(state, { configuration: serializeConfiguration(row, true, getExternalSyncStatus) });
   }
 
   function approveDraft(input) {
@@ -329,10 +362,10 @@ function createPerformanceFeishuConnectionService(db, options = {}) {
       version: Number(approved.version)
     });
     const state = stateFor(context);
-    return Object.assign(state, { configuration: serializeConfiguration(approved, true) });
+    return Object.assign(state, { configuration: serializeConfiguration(approved, true, getExternalSyncStatus) });
   }
 
-  return Object.freeze({ getConnection, createDraft, approveDraft });
+  return Object.freeze({ getConnection, getDeliveryConfiguration, createDraft, approveDraft });
 }
 
 module.exports = {

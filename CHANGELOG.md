@@ -1,5 +1,13 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.38-performance-feishu-delivery-slice (Verification ready, production deployment pending, 2026-09-28) - 性能数据飞书幂等投递切片
+
+- 将已批准的性能字段映射接入现有 Feishu Bitable outbox：当前状态按视频链接更新/补写，每日快照追加到独立目标表；所有外部写入仍由服务端开关控制，未启用时保留 CSV 降级流程。
+- 新增性能投递回执、UUID 幂等、已批准配置版本绑定、外部结果不确定时的待核对状态、显式重试和管理员回执确认；前端显示最近投递记录并阻止活动切换后的旧请求污染当前界面。
+- 新增 `GET /api/campaigns/:id/performance/feishu-deliveries`、`POST /api/campaigns/:id/performance/feishu-sync` 和显式重试 API；保留原有连接配置、预览和 CSV 导出行为。
+- 聚焦性能/飞书/前端合同测试 `89/89` 通过；受信部署源合同与门禁 `97/97` 通过；JavaScript、PowerShell 语法和 `git diff --check` 通过。独立审查无阻断项，生产部署与远端验收待本轮完成。
+- 本切片不宣称 Phase 7B 全部完成：Provider 定时采集、按项目本地日去重、小时级回流白名单、02:00 对账、死信和连续性能观察仍保留在后续切片。
+
 ## v0.9.37-phase8-source-profile-continuity (Production deployed, 2026-09-28) - Phase 8 来源档案连续性
 
 - 补齐 schema v32 的生产清洗器精确 profile、结构策略、受信来源清单和迁移门禁支持。

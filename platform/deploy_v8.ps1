@@ -33,8 +33,8 @@ $EXPECTED_PPT_SHA256 = "1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8b
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "ed97a648a17aceebca8ee9bf7ebf1f104c0bdb137a6d80baf4730aa900b56e3f"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "1d070ad59f050b910d395587cb0b445866a2f5c3e49a1e07aa7107cb65a484e5"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "8078dd025be97bfe189ed282c8afdc091f0f5d4281f378f407cdc4a7b92869da"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "f38673683700c04780af7ec63f80101e194b23edf26e0b6b5b069b9d9cca91ed"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "9ed9caaa9898624cdd0a6b4754e8794cabd7e143491183618527a90b7e6aaafd"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -193,6 +193,7 @@ $FILES = @(
     "server\services\crm_query_service.js",
     "server\services\crm_scope_service.js",
     "server\services\feishu_bitable_outbox_service.js",
+    "server\services\performance_feishu_contract.js",
     "server\services\file_ingest_service.js",
     "server\services\idempotency_service.js",
     "server\services\influencer_data_import_permission_service.js",
@@ -216,6 +217,7 @@ $FILES = @(
     "server\services\performance_content_analysis_service.js",
     "server\services\performance_collection_run_service.js",
     "server\services\performance_feishu_connection_service.js",
+    "server\services\performance_feishu_delivery_service.js",
     "server\services\performance_feishu_projection_service.js",
     "server\services\performance_freshness_service.js",
     "server\services\performance_manual_service.js",
@@ -343,6 +345,7 @@ $FILES = @(
     "server\tests\performance_collection_run_service.test.js",
     "server\tests\performance_frontend_contract.test.js",
     "server\tests\performance_feishu_connection_service.test.js",
+    "server\tests\performance_feishu_delivery_service.test.js",
     "server\tests\performance_feishu_projection_service.test.js",
     "server\tests\performance_freshness_frontend_behavior.test.js",
     "server\tests\performance_freshness_service.test.js",

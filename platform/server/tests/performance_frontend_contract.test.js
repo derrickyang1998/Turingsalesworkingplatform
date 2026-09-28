@@ -182,15 +182,41 @@ test('performance monitor exposes a collapsed, campaign-scoped integration previ
   );
 });
 
-test('performance monitor exposes a permission-aware Feishu connection configuration without external synchronization', () => {
+test('performance monitor exposes a permission-aware Feishu connection configuration and controlled external synchronization', () => {
   assert.match(indexHtml, /id="performanceFeishuConnection"/);
+  assert.match(indexHtml, /id="performanceFeishuDeliveryPanel"/);
   assert.match(indexHtml, /活动飞书连接配置/);
+  assert.match(indexHtml, /效果数据同步与回执/);
   assert.match(appSource, /var performanceFeishuConnectionRequestSequence = 0;/);
+  assert.match(appSource, /var performanceFeishuDeliveryHistoryRequestSequence = 0;/);
+  assert.match(appSource, /var performanceFeishuDeliveryActionSequence = 0;/);
+  assert.match(appSource, /function performanceFeishuDeliveryActionIsCurrent\([\s\S]*?performanceFeishuDeliveryActionSequence/);
+  assert.match(
+    appSource,
+    /function changePerformanceCampaignContext\([\s\S]*?performanceFeishuDeliveryActionSequence \+= 1;[\s\S]*?performanceFeishuDeliveryHistory = \[\];/
+  );
   assert.match(appSource, /async function loadPerformanceFeishuConnection\(\)/);
+  assert.match(appSource, /async function loadPerformanceFeishuDeliveries\(\)/);
   assert.match(appSource, /function renderPerformanceFeishuConnection\(/);
+  assert.match(appSource, /function renderPerformanceFeishuDeliveryPanel\(/);
   assert.match(appSource, /function savePerformanceFeishuConnectionDraft\(\)/);
   assert.match(appSource, /function approvePerformanceFeishuConnectionDraft\(\)/);
+  assert.match(appSource, /async function syncPerformanceFeishuSnapshot\(targetKind\)/);
+  assert.match(appSource, /async function retryPerformanceFeishuDelivery\(deliveryId\)/);
+  assert.match(appSource, /async function reconcilePerformanceFeishuDelivery\(deliveryId\)/);
   assert.match(appSource, /performance\/feishu-connection/);
+  assert.match(appSource, /performance\/feishu-deliveries\?limit=10/);
+  assert.match(appSource, /performance\/feishu-sync/);
+  assert.match(appSource, /snapshot_kind: targetKind/);
+  assert.match(appSource, /Idempotency-Key.*createFeishuBitableOperationId/);
+  for (const action of ['syncPerformanceFeishuSnapshot', 'retryPerformanceFeishuDelivery', 'reconcilePerformanceFeishuDelivery']) {
+    assert.match(
+      appSource,
+      new RegExp(
+        'async function ' + action + '\\([\\s\\S]*?var actionSequence = \\+\\+performanceFeishuDeliveryActionSequence;[\\s\\S]*?performanceFeishuDeliveryActionIsCurrent\\(actionSequence, campaignId\\)'
+      )
+    );
+  }
   assert.match(appSource, /not_enabled_in_this_release/);
   assert.match(appSource, /field\.access !== 'commercial'/);
   for (const action of ['savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft']) {
@@ -203,7 +229,9 @@ test('performance monitor exposes a permission-aware Feishu connection configura
   }
   assert.match(componentStyles, /\.tm-performance-feishu-connection-form/);
   assert.match(componentStyles, /\.tm-performance-feishu-connection-mapping/);
+  assert.match(componentStyles, /\.tm-performance-feishu-delivery-panel/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE/);
+  assert.match(serverSource, /performanceFeishuBitableOutboxService/);
 });
 
 test('an approved Feishu mapping can export the current observed snapshot from the existing connection panel', () => {

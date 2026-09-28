@@ -21,6 +21,21 @@ const {
   PerformanceFeishuProjectionServiceError,
   createPerformanceFeishuProjectionService
 } = require('./services/performance_feishu_projection_service');
+const {
+  PerformanceFeishuDeliveryServiceError,
+  createPerformanceFeishuDeliveryService
+} = require('./services/performance_feishu_delivery_service');
+const {
+  PerformanceFeishuContractError
+} = require('./services/performance_feishu_contract');
+const {
+  FeishuClientError,
+  createFeishuClient
+} = require('./feishu_client');
+const {
+  FeishuBitableOutboxError,
+  createFeishuBitableOutboxService
+} = require('./services/feishu_bitable_outbox_service');
 const { createPerformanceFreshnessService } = require('./services/performance_freshness_service');
 const {
   PerformanceCollectionRunServiceError,
@@ -61,6 +76,10 @@ function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
     error instanceof PerformanceFeishuProjectionServiceError ||
+    error instanceof PerformanceFeishuDeliveryServiceError ||
+    error instanceof PerformanceFeishuContractError ||
+    error instanceof FeishuClientError ||
+    error instanceof FeishuBitableOutboxError ||
     error instanceof PerformanceCollectionRunServiceError ||
     error instanceof PerformanceProviderCollectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
@@ -81,6 +100,7 @@ function sendError(request, response, error) {
   if (known && (error.retryAfterSeconds || error.retryAfter)) {
     response.setHeader('Retry-After', String(error.retryAfterSeconds || error.retryAfter));
   }
+  if (known && error.delivery) body.delivery = error.delivery;
   return response.status(status).json(body);
 }
 
@@ -259,6 +279,21 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof feishuProjectionService.exportCsv !== 'function') {
     throw new TypeError('A performance Feishu projection service is required.');
   }
+  const feishuDeliveryService = options.feishuDeliveryService || (() => {
+    const feishuClient = options.feishuClient || createFeishuClient();
+    const feishuBitableOutboxService = options.feishuBitableOutboxService ||
+      createFeishuBitableOutboxService(options.db);
+    return createPerformanceFeishuDeliveryService({
+      projectionService: feishuProjectionService,
+      connectionService: feishuConnectionService,
+      feishuClient,
+      outboxService: feishuBitableOutboxService
+    });
+  })();
+  if (!feishuDeliveryService || typeof feishuDeliveryService.sync !== 'function' || typeof feishuDeliveryService.retry !== 'function') {
+    throw new TypeError('A performance Feishu delivery service is required.');
+  }
+  const feishuDeliveryListService = options.feishuBitableOutboxService || null;
   const aiReviewService = options.aiReviewService || createPerformanceAiReviewService(options.db, {
     performanceService: service,
     aiService: options.aiService
@@ -535,6 +570,28 @@ function registerPerformanceRoutes(app, options = {}) {
     }
   });
 
+  app.get('/api/campaigns/:id/performance/feishu-deliveries', options.authMiddleware, (request, response) => {
+    try {
+      if (!feishuDeliveryListService || typeof feishuDeliveryListService.listPerformance !== 'function') {
+        throw new PerformanceFeishuDeliveryServiceError(
+          503,
+          'PERFORMANCE_FEISHU_DELIVERY_LIST_UNAVAILABLE',
+          'Performance Feishu delivery history is unavailable.'
+        );
+      }
+      return response.json({
+        deliveries: feishuDeliveryListService.listPerformance({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id,
+          limit: request.query && request.query.limit
+        }),
+        request_id: requestId(request)
+      });
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
   app.get('/api/campaigns/:id/performance/feishu-projection-preview', options.authMiddleware, (request, response) => {
     try {
       return sendResult(request, response, feishuProjectionService.preview({
@@ -581,6 +638,35 @@ function registerPerformanceRoutes(app, options = {}) {
       }
     }
   );
+
+  app.post('/api/campaigns/:id/performance/feishu-sync', options.authMiddleware, async (request, response) => {
+    try {
+      const result = await feishuDeliveryService.sync({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        body: request.body,
+        operationId: requestHeader(request, 'Idempotency-Key')
+      });
+      return response.status(result.statusCode).json(Object.assign({}, result.body, { request_id: requestId(request) }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/feishu-deliveries/:deliveryId/retry', options.authMiddleware, async (request, response) => {
+    try {
+      const result = await feishuDeliveryService.retry({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        deliveryId: request.params.deliveryId,
+        reason: request.body && request.body.reason,
+        operationId: requestHeader(request, 'Idempotency-Key')
+      });
+      return response.status(result.statusCode).json(Object.assign({}, result.body, { request_id: requestId(request) }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
 
   app.post('/api/campaigns/:id/performance/feishu-connection', options.authMiddleware, (request, response) => {
     try {

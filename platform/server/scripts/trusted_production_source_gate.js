@@ -195,7 +195,9 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/systemd/turingmarket-gate-cleanup.service',
   'server/systemd/turingmarket-parser.manifest.json',
   'server/systemd/turingmarket-parser.slice',
-  'server/systemd/turingmarket-parser@.service'
+  'server/systemd/turingmarket-parser@.service',
+  'server/services/performance_feishu_contract.js',
+  'server/services/performance_feishu_delivery_service.js'
 ]);
 
 const EXPECTED_ENTRYPOINTS = Object.freeze({

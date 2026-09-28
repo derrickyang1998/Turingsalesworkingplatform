@@ -183,3 +183,59 @@ test('rejects a snapshot whose stable read boundary contains duplicate publicati
     error && error.code === 'PERFORMANCE_FEISHU_PROJECTION_SOURCE_CHANGED' && error.statusCode === 409
   ));
 });
+
+test('prepares a server-only delivery snapshot with the approved configuration version and selected target', () => {
+  const calls = [];
+  const configuration = connectionState().active_configuration;
+  const service = projectionModule.createPerformanceFeishuProjectionService({
+    now: () => new Date('2026-09-10T09:00:00.000Z'),
+    feishuConnectionService: {
+      getConnection() {
+        return connectionState();
+      },
+      getDeliveryConfiguration(input) {
+        calls.push(['delivery-configuration', input]);
+        return configuration;
+      }
+    },
+    performanceService: {
+      getProjectionSnapshot(input) {
+        calls.push(['snapshot', input]);
+        return performanceContents();
+      }
+    }
+  });
+
+  const result = service.prepareDelivery({ userId: 2, campaignId: 7, targetKind: 'daily_snapshot' });
+
+  assert.equal(result.target_kind, 'daily_snapshot');
+  assert.equal(result.configuration, configuration);
+  assert.equal(result.records.length, 1);
+  assert.deepEqual(result.records[0].fields, {
+    '视频链接': 'https://www.youtube.com/watch?v=abc123',
+    '内容标签': 'fitness, launch',
+    '数据更新时间': '2026-09-10T08:30:00.000Z',
+    '播放量': 1234,
+    '互动率': 0.08
+  });
+  assert.deepEqual(calls, [
+    ['delivery-configuration', { userId: 2, campaignId: 7 }],
+    ['snapshot', { userId: 2, campaignId: 7 }]
+  ]);
+});
+
+test('does not prepare a Feishu delivery when an observed row has no required video link', () => {
+  const source = performanceContents();
+  source.items[0] = Object.assign({}, source.items[0], { original_url: null });
+  const service = projectionModule.createPerformanceFeishuProjectionService({
+    feishuConnectionService: {
+      getConnection() { return connectionState(); },
+      getDeliveryConfiguration() { return connectionState().active_configuration; }
+    },
+    performanceService: { getProjectionSnapshot() { return source; } }
+  });
+
+  assert.throws(() => service.prepareDelivery({ userId: 2, campaignId: 7, targetKind: 'current_state' }), (error) => (
+    error && error.code === 'PERFORMANCE_FEISHU_PROJECTION_REQUIRED_FIELD_MISSING' && error.statusCode === 409
+  ));
+});

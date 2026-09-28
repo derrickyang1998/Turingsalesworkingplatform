@@ -12278,6 +12278,10 @@ var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
 var performanceFeishuConnectionRequestSequence = 0;
 var performanceFeishuConnectionSaveInFlight = false;
+var performanceFeishuDeliveryHistory = [];
+var performanceFeishuDeliveryHistoryRequestSequence = 0;
+var performanceFeishuDeliveryActionInFlight = false;
+var performanceFeishuDeliveryActionSequence = 0;
 var performanceFeishuSnapshotExportRequestSequence = 0;
 var activePerformanceFeishuSnapshotExport = null;
 var performanceSearchTimer = null;
@@ -12458,6 +12462,10 @@ function changePerformanceCampaignContext(value) {
   performanceFreshnessRequestSequence += 1;
   performanceCollectionRunRequestSequence += 1;
   performanceProviderRefreshRequestSequence += 1;
+  performanceFeishuDeliveryHistoryRequestSequence += 1;
+  performanceFeishuDeliveryActionSequence += 1;
+  performanceFeishuDeliveryHistory = [];
+  performanceFeishuDeliveryActionInFlight = false;
   performanceProviderRefreshInFlight = false;
   performanceProviderRefreshRetry = { campaignId: null, idempotencyKey: '' };
   performanceCampaignContextId = performancePositiveId(value);
@@ -12468,7 +12476,9 @@ function changePerformanceCampaignContext(value) {
   loadPerformanceContents();
   loadPerformanceFreshnessQueue();
   loadPerformanceCollectionRuns();
-  loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
+  loadPerformanceIntegrationPreview().then(function() {
+    return Promise.all([loadPerformanceFeishuConnection(), loadPerformanceFeishuDeliveries()]);
+  });
   loadPerformanceDashboard();
   loadPerformanceReviewEvidence();
   loadPerformanceContentAnalysisOptions();
@@ -12479,7 +12489,7 @@ function changePerformanceCampaignContext(value) {
 function refreshPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
     return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceIntegrationPreview()]).then(function() {
-      return loadPerformanceFeishuConnection();
+      return Promise.all([loadPerformanceFeishuConnection(), loadPerformanceFeishuDeliveries()]);
     });
   });
 }
@@ -12502,7 +12512,7 @@ function refreshPerformanceDashboard() {
 function initPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
     return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceIntegrationPreview()]).then(function() {
-      return loadPerformanceFeishuConnection();
+      return Promise.all([loadPerformanceFeishuConnection(), loadPerformanceFeishuDeliveries()]);
     });
   });
 }
@@ -12993,10 +13003,250 @@ function performanceFeishuConnectionSummary(connection) {
 
 function performanceFeishuExternalSyncDetail(connection) {
   var external = connection && connection.external_sync || {};
+  if (external.enabled === true) {
+    return '性能数据飞书写入已启用；同步前仍以已批准的字段映射为准。';
+  }
+  if (external.reason === 'not_configured') {
+    return '当前部署未启用性能数据飞书写入，可继续下载 CSV 手工导入。';
+  }
   if (external.reason === 'not_enabled_in_this_release') {
     return '本版本只保存并审核配置，尚未执行飞书读取或写入。';
   }
-  return '外部同步尚未启用。';
+  return '外部同步尚未启用，可继续使用 CSV 降级流程。';
+}
+
+function performanceFeishuDeliveryStatusLabel(status) {
+  if (status === 'succeeded') return '已写入';
+  if (status === 'failed') return '失败';
+  if (status === 'pending') return '待核对';
+  return status || '未知';
+}
+
+function performanceFeishuDeliveryHistoryIsCurrent(sequence, campaignId) {
+  return sequence === performanceFeishuDeliveryHistoryRequestSequence &&
+    campaignId === getPerformanceCampaignId();
+}
+
+function performanceFeishuDeliveryActionIsCurrent(sequence, campaignId) {
+  return sequence === performanceFeishuDeliveryActionSequence &&
+    campaignId === getPerformanceCampaignId();
+}
+
+function setPerformanceFeishuDeliveryBusy(busy) {
+  var panel = document.getElementById('performanceFeishuDeliveryPanel');
+  if (!panel) return;
+  var controls = panel.querySelectorAll('[data-performance-feishu-delivery-action]');
+  for (var index = 0; index < controls.length; index += 1) controls[index].disabled = Boolean(busy);
+}
+
+function renderPerformanceFeishuDeliveryPanel(connection, deliveries, errorMessage) {
+  var panel = document.getElementById('performanceFeishuDeliveryPanel');
+  if (!panel) return;
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null || !connection) {
+    panel.innerHTML = '<div class="tm-state-empty">选择推广活动后加载同步状态。</div>';
+    return;
+  }
+  if (errorMessage) {
+    panel.innerHTML = '<div class="tm-state-error">' + esc(errorMessage) + '</div>';
+    return;
+  }
+  var capabilities = connection.capabilities || {};
+  var active = connection.active_configuration || null;
+  var external = connection.external_sync || {};
+  var canApprove = capabilities.can_approve === true;
+  var hasApprovedMapping = active && active.status === 'approved';
+  var canSync = canApprove && hasApprovedMapping && external.enabled === true && !performanceFeishuDeliveryActionInFlight;
+  var actions = '';
+  if (!canApprove) {
+    actions = '<p class="tm-performance-integration-note">当前账号只能查看同步回执；写入和回执处理由组织管理员执行。</p>';
+  } else if (!hasApprovedMapping) {
+    actions = '<p class="tm-performance-integration-note">请先批准活动的飞书字段映射，再执行效果数据同步。</p>';
+  } else if (external.enabled !== true) {
+    actions = '<p class="tm-performance-integration-note">性能数据飞书写入开关尚未启用。当前可使用已批准映射下载 CSV，不会发起外部请求。</p>';
+  } else {
+    actions = '<div class="tm-performance-feishu-delivery-actions">'
+      + '<button class="btn btn-primary btn-sm" type="button" data-performance-feishu-delivery-action="sync-current" onclick="syncPerformanceFeishuSnapshot(\'current_state\')"' + (canSync ? '' : ' disabled') + '>同步当前状态</button>'
+      + '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-delivery-action="sync-daily" onclick="syncPerformanceFeishuSnapshot(\'daily_snapshot\')"' + (canSync && active.daily_snapshot_table_id ? '' : ' disabled') + ' title="' + (active.daily_snapshot_table_id ? '向每日快照表追加当天快照' : '尚未配置每日快照表') + '">追加每日快照</button>'
+      + '</div>';
+  }
+  var rows = Array.isArray(deliveries) ? deliveries : [];
+  var historyHtml = rows.length ? rows.map(function(delivery) {
+    var id = readPositiveInteger(delivery && delivery.id);
+    if (id === null) return '';
+    var status = performanceFeishuDeliveryStatusLabel(delivery.status);
+    var action = '';
+    if (canApprove && delivery.status === 'pending') {
+      action = '<div class="tm-performance-feishu-delivery-reconcile">'
+        + '<label>远端记录 ID（每行一条）<textarea id="performanceFeishuRemoteIds-' + id + '" rows="2" data-performance-feishu-delivery-action="remote-ids"></textarea></label>'
+        + '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-delivery-action="reconcile" onclick="reconcilePerformanceFeishuDelivery(' + id + ')">确认回执</button>'
+        + '</div>';
+    } else if (canApprove && delivery.status === 'failed' && delivery.retry_available === true) {
+      action = '<div class="tm-performance-feishu-delivery-retry">'
+        + '<input id="performanceFeishuRetryReason-' + id + '" data-performance-feishu-delivery-action="retry-reason" maxlength="280" placeholder="填写重试原因" value="已核对飞书记录，准备重试">'
+        + '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-delivery-action="retry" onclick="retryPerformanceFeishuDelivery(' + id + ')">显式重试</button>'
+        + '</div>';
+    }
+    return '<div class="tm-performance-feishu-delivery-row">'
+      + '<div><strong>回执 #' + id + '</strong><span class="tm-performance-feishu-delivery-status tm-performance-feishu-delivery-status-' + esc(String(delivery.status || 'unknown')) + '">' + esc(status) + '</span></div>'
+      + '<div class="tm-performance-feishu-delivery-meta">记录 ' + Number(delivery.record_count || 0) + ' 条 · 远端确认 ' + Number(delivery.remote_record_count || 0) + ' 条'
+      + (delivery.last_error_code ? ' · ' + esc(delivery.last_error_code) : '') + '</div>'
+      + action + '</div>';
+  }).join('') : '<div class="tm-state-empty">当前活动还没有性能数据飞书投递记录。</div>';
+  panel.innerHTML = '<div class="tm-performance-feishu-delivery-panel">'
+    + '<div class="tm-performance-feishu-delivery-intro"><p>每次提交都会生成独立幂等回执；出现待核对状态时，先在飞书确认是否已写入，再确认回执或显式重试。</p></div>'
+    + actions
+    + '<div class="tm-performance-feishu-delivery-history"><h4>最近性能投递</h4>' + historyHtml + '</div>'
+    + '</div>';
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceFeishuDeliveries() {
+  var campaignId = getPerformanceCampaignId();
+  var sequence = ++performanceFeishuDeliveryHistoryRequestSequence;
+  if (campaignId === null) {
+    performanceFeishuDeliveryHistory = [];
+    renderPerformanceFeishuDeliveryPanel(null, [], null);
+    return [];
+  }
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-deliveries?limit=10');
+    var data = await response.json();
+    if (!performanceFeishuDeliveryHistoryIsCurrent(sequence, campaignId)) return [];
+    if (!response.ok) throw new Error(data.error || '飞书投递记录加载失败');
+    performanceFeishuDeliveryHistory = Array.isArray(data.deliveries) ? data.deliveries : [];
+    renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, performanceFeishuDeliveryHistory, null);
+    return performanceFeishuDeliveryHistory;
+  } catch (error) {
+    if (!performanceFeishuDeliveryHistoryIsCurrent(sequence, campaignId)) return [];
+    renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, [], error.message || '飞书投递记录加载失败');
+    return [];
+  }
+}
+
+async function syncPerformanceFeishuSnapshot(targetKind) {
+  var campaignId = getPerformanceCampaignId();
+  var active = performanceFeishuConnection && performanceFeishuConnection.active_configuration;
+  var capabilities = performanceFeishuConnection && performanceFeishuConnection.capabilities || {};
+  if (campaignId === null || !active || active.status !== 'approved' || capabilities.can_approve !== true) {
+    toast('当前账号或活动状态不允许执行性能数据同步。', 'error');
+    return null;
+  }
+  if (targetKind === 'daily_snapshot' && !active.daily_snapshot_table_id) {
+    toast('尚未配置每日快照表。', 'error');
+    return null;
+  }
+  if (performanceFeishuDeliveryActionInFlight) return null;
+  var actionSequence = ++performanceFeishuDeliveryActionSequence;
+  performanceFeishuDeliveryActionInFlight = true;
+  setPerformanceFeishuDeliveryBusy(true);
+  var operationId = createFeishuBitableOperationId();
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-sync', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': operationId },
+      body: JSON.stringify({ snapshot_kind: targetKind })
+    });
+    var data = await response.json();
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    if (!response.ok) throw new Error(data.error || '性能数据飞书同步失败');
+    if (data.code === 'PERFORMANCE_FEISHU_RECONCILIATION_REQUIRED' || response.status === 202) {
+      toast('飞书写入结果待核对，请确认远端记录后处理回执。', 'error');
+    } else if (data.configured === false) {
+      toast('飞书写入未启用，已保留 CSV 手工导入流程。');
+    } else {
+      toast(targetKind === 'daily_snapshot' ? '每日效果快照已提交到飞书。' : '当前效果数据已提交到飞书。');
+    }
+    await loadPerformanceFeishuDeliveries();
+    return data;
+  } catch (error) {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    toast(error.message || '性能数据飞书同步失败', 'error');
+    await loadPerformanceFeishuDeliveries();
+    return null;
+  } finally {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return;
+    performanceFeishuDeliveryActionInFlight = false;
+    setPerformanceFeishuDeliveryBusy(false);
+    renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, performanceFeishuDeliveryHistory, null);
+  }
+}
+
+async function retryPerformanceFeishuDelivery(deliveryId) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedDeliveryId = readPositiveInteger(deliveryId);
+  var reasonInput = document.getElementById('performanceFeishuRetryReason-' + normalizedDeliveryId);
+  var reason = reasonInput ? String(reasonInput.value || '').trim() : '';
+  if (campaignId === null || normalizedDeliveryId === null || !reason) {
+    toast('请填写有效的重试原因。', 'error');
+    return null;
+  }
+  if (performanceFeishuDeliveryActionInFlight) return null;
+  var actionSequence = ++performanceFeishuDeliveryActionSequence;
+  performanceFeishuDeliveryActionInFlight = true;
+  setPerformanceFeishuDeliveryBusy(true);
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-deliveries/' + normalizedDeliveryId + '/retry', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': createFeishuBitableOperationId() },
+      body: JSON.stringify({ reason: reason })
+    });
+    var data = await response.json();
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    if (!response.ok && response.status !== 202) throw new Error(data.error || '性能数据飞书重试失败');
+    toast(data.code === 'PERFORMANCE_FEISHU_RECONCILIATION_REQUIRED' || response.status === 202
+      ? '重试结果待核对，请处理飞书回执。'
+      : '性能数据飞书重试已提交。');
+    await loadPerformanceFeishuDeliveries();
+    return data;
+  } catch (error) {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    toast(error.message || '性能数据飞书重试失败', 'error');
+    return null;
+  } finally {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return;
+    performanceFeishuDeliveryActionInFlight = false;
+    setPerformanceFeishuDeliveryBusy(false);
+    renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, performanceFeishuDeliveryHistory, null);
+  }
+}
+
+async function reconcilePerformanceFeishuDelivery(deliveryId) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedDeliveryId = readPositiveInteger(deliveryId);
+  var input = document.getElementById('performanceFeishuRemoteIds-' + normalizedDeliveryId);
+  var remoteRecordIds = String(input && input.value || '').split(/\r?\n/).map(function(value) {
+    return value.trim();
+  }).filter(function(value) { return value.length > 0; });
+  if (campaignId === null || normalizedDeliveryId === null || !remoteRecordIds.length) {
+    toast('请填写飞书中已确认的远端记录 ID。', 'error');
+    return null;
+  }
+  if (performanceFeishuDeliveryActionInFlight) return null;
+  var actionSequence = ++performanceFeishuDeliveryActionSequence;
+  performanceFeishuDeliveryActionInFlight = true;
+  setPerformanceFeishuDeliveryBusy(true);
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/feishu-deliveries/' + normalizedDeliveryId + '/reconcile', {
+      method: 'POST',
+      body: JSON.stringify({ remote_record_ids: remoteRecordIds })
+    });
+    var data = await response.json();
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    if (!response.ok) throw new Error(data.error || '飞书回执确认失败');
+    toast('性能数据飞书回执已确认。');
+    await loadPerformanceFeishuDeliveries();
+    return data;
+  } catch (error) {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return null;
+    toast(error.message || '飞书回执确认失败', 'error');
+    return null;
+  } finally {
+    if (!performanceFeishuDeliveryActionIsCurrent(actionSequence, campaignId)) return;
+    performanceFeishuDeliveryActionInFlight = false;
+    setPerformanceFeishuDeliveryBusy(false);
+    renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, performanceFeishuDeliveryHistory, null);
+  }
 }
 
 function renderPerformanceFeishuConnection(connection) {
@@ -13005,6 +13255,7 @@ function renderPerformanceFeishuConnection(connection) {
   if (!container) return;
   if (!connection) {
     container.innerHTML = '<div class="tm-state-empty">选择推广活动后加载连接配置。</div>';
+    renderPerformanceFeishuDeliveryPanel(null, [], null);
     return;
   }
 
@@ -13024,6 +13275,7 @@ function renderPerformanceFeishuConnection(connection) {
   if (!canManage) {
     html += '<p class="tm-performance-integration-note">当前角色可查看连接状态；目标表与字段映射仅对活动负责人和组织管理员开放。</p>';
     container.innerHTML = html + '</div>';
+    renderPerformanceFeishuDeliveryPanel(connection, performanceFeishuDeliveryHistory, null);
     if (window.TMAccessibility) window.TMAccessibility.refresh();
     return;
   }
@@ -13064,6 +13316,7 @@ function renderPerformanceFeishuConnection(connection) {
     + snapshotAction
     + '</div></div>';
   container.innerHTML = html + '</div>';
+  renderPerformanceFeishuDeliveryPanel(connection, performanceFeishuDeliveryHistory, null);
   if (window.TMAccessibility) window.TMAccessibility.refresh();
 }
 
@@ -16037,7 +16290,7 @@ function switchPage(id, options) {
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'loadPerformanceFeishuDeliveries', 'syncPerformanceFeishuSnapshot', 'retryPerformanceFeishuDelivery', 'reconcilePerformanceFeishuDelivery', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOperations', 'loadMoreAdminOperations', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
