@@ -1,11 +1,12 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.36-demand-proposal-tenant-ownership (Verification ready, 2026-09-28) - 需求与方案组织边界
+## v0.9.36-demand-proposal-tenant-ownership (Production deployed, 2026-09-28) - 需求与方案组织边界
 
 - 新增迁移 `032_demand_proposal_tenant_ownership`，为需求和方案补齐组织归属、历史回填、索引及写入校验；无法唯一判断归属的历史数据会让迁移失败，不静默跨组织归类。
 - 旧版 `/api/demands`、`/api/proposals` 兼容路径保留；新 API 写入绑定当前认证组织，普通用户集合查询按组织过滤，管理员继续具备全平台审计可见性。
 - Campaign 目标访问、需求/方案创建和可信生产源码清单已同步到迁移 v32；双轮迁移门禁 `20/20`、本地发布预检通过。
-- 生产部署尚未执行；本轮未读取、修改、轮换或使用 `derrick` 凭据。
+- 已通过 guarded production deploy：run `c83a995cbda54f85966bb7af58594a43`，candidate SHA-256 `d8a39b06f19dcbb9a65cb2d836e127742f637212d7f1c20323f9c8f7f7abe2b6`，备份 `v060-crm-sales-workspace-20260928-173957`。
+- 线上验收：迁移版本 32、回放门、浏览器烟测 `3/3`、parser readiness、AI 并发、组织账单、公共发布守卫全部通过；公网 `/api/health` 返回 `status=ok` 且 parser ready；`PROTECTED_CREDENTIALS_UNCHANGED 39` 通过，未读取、修改、轮换或使用 `derrick` 凭据。
 
 ## v0.9.35-admin-operations-health-state (Production deployed, 2026-09-28) - 运营健康状态投影
 

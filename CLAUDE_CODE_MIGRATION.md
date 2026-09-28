@@ -1,6 +1,6 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-09-21
+Updated / 更新日期：2026-09-28
 
 ## Authoritative Baseline / 权威基线
 
@@ -8,9 +8,9 @@ Updated / 更新日期：2026-09-21
 - Current production delivery branch / 当前生产交付分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Guarded Phase 6 incremental release branch / 第 6 阶段受控增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
-- Current accepted production source / 当前已验收生产源码：`184336d` (`v0.9.35-admin-operations-health-state`)
+- Current accepted production source / 当前已验收生产源码：`ce66019` (`v0.9.36-demand-proposal-tenant-ownership`)
 - Current business-feature source / 当前业务功能源码：implementation range `dbbceb3` through `43bb85b`; token-usage tenant ownership is in `b4d6ba0`, unified AI quota admission/accounting is in `f1f9c98`, plan entitlements are in `1509d5b` through `b9874d5`, subscription expiry is accepted through `6b2d579`, organization monthly shared AI quota is in `f963132`, and durable provider concurrency is accepted through `43bb85b` / 业务实现范围为 `dbbceb3` 至 `43bb85b`；Token 用量租户归属位于 `b4d6ba0`，统一 AI 配额准入位于 `f1f9c98`，套餐权益位于 `1509d5b` 至 `b9874d5`，订阅到期控制接纳至 `6b2d579`，组织月度共享 AI 配额位于 `f963132`，持久 Provider 并发接纳至 `43bb85b`
-- Current release-controller source / 当前发布控制器源码：`184336d` (schema-v31 trusted inventory, organization-health state candidate and production acceptance gates, normalized source bytes, and verified interruption-recoverable retention / schema v31 可信清单、组织健康状态候选与生产验收门禁、源码字节规范化及可验证可中断恢复的保留控制)
+- Current release-controller source / 当前发布控制器源码：`ce66019` (schema-v32 trusted inventory, demand/proposal tenant ownership, and production acceptance gates / schema v32 可信清单、需求与方案组织归属及生产验收门禁)
 - Backend / 后端：Node.js 20 + Express 5
 - Database / 数据库：SQLite through `better-sqlite3`
 - PM2 / 进程：`platform/ecosystem.config.js` -> `server/server.js`, process name `turingmarket`
@@ -21,9 +21,9 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 
 ## Current Production Status / 当前生产状态
 
-- Release / 版本：`v0.9.35-admin-operations-health-state`, deployed and verified on `2026-09-28` / 已于 `2026-09-28` 部署并验收。
-- Production run / 生产运行：`6967abcd9eab4c0caa65bfd5140ddf5e`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260928-160826`; candidate SHA-256 / 候选摘要：`72bf04c8ad3d28007d6e6d4c8c67c1ad15ba8281e73dbc5a159cb658a212e35b`。
-- Acceptance-time runtime / 验收时运行状态：PM2 `online`, restart count `0`; Nginx is active; public `/api/health` is `200` with parser ready; schema v30, SQLite `quick_check=ok`, foreign-key violations `0`, affected matrix `103/103`, migration exactness `23/23`, replay `8/8`, release inventory `5/5`, trusted-source targets `3/3`, and deployment Chromium smoke `3/3` passed / PM2 在线且无重启，Nginx、公网健康、解析器、schema v30、SQLite 完整性、定向矩阵、迁移精确性、重放、发布清单、可信目标及部署浏览器冒烟均正常。
+- Release / 版本：`v0.9.36-demand-proposal-tenant-ownership`, deployed and verified on `2026-09-28` / 已于 `2026-09-28` 部署并验收。
+- Production run / 生产运行：`c83a995cbda54f85966bb7af58594a43`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260928-173957`; candidate SHA-256 / 候选摘要：`d8a39b06f19dcbb9a65cb2d836e127742f637212d7f1c20323f9c8f7f7abe2b6`。
+- Acceptance-time runtime / 验收时运行状态：PM2 `online`; public `/api/health` is `200` with parser ready; schema v32, SQLite `quick_check=ok`, foreign-key violations `0`, replay gate, AI concurrency, organization billing, public release guard, and deployment Chromium smoke `3/3` passed / PM2 在线、公网健康、解析器、schema v32、SQLite 完整性、重放、AI 并发、组织账单、公共发布守卫及浏览器冒烟均正常。
 - Current reachability / 当前可达性：the authoritative host is reachable through the local SOCKS path `127.0.0.1:10808`; SSH alias `turingmarket-production-via-local-proxy` and proxied HTTP were verified. Direct local routing may still time out, so retain the proxy path for subsequent releases. `agent.turingmarket.ai` remains a separate Nuxt application and is not this production target. / 权威主机已通过本机 SOCKS 通道恢复 SSH 与 HTTP；后续发布保留该代理路径，另一 Nuxt 应用仍不得作为替代生产目标。
 - Database / 数据库：schema `v30`, integrity `ok`, foreign-key violations `0`; immutable plan/module catalog, append-only subscription and organization quota policies, durable provider reservations/events, and the tenant-owned Token ledger are active / schema v30、完整性与外键正常；不可变套餐/模块目录、仅追加订阅与组织配额策略、持久 Provider 预留/事件及租户归属 Token 账本均已启用。
 - Phase 8 current slices / 第 8 阶段当前切片：the fail-closed module/action foundation, authoritative roles, scoped member governance, tenant ownership, server-side AI quota admission, immutable plan entitlements, subscription expiry, organization monthly shared quota, durable provider concurrency, billing, and admin operations health state are active. Phase 8 closeout evidence reconciliation remains. / 默认拒绝权限底座、权威角色、成员治理、租户归属、服务端 AI 配额准入、不可变套餐权益、订阅到期、组织月度共享配额、持久 Provider 并发、账单及管理控制室运营健康状态均已上线；第 8 阶段仍需完成最终证据收口。
