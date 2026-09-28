@@ -364,6 +364,14 @@ function knowledgeBody(campaignId, sourceId, overrides = {}) {
 
 function bulkFillUserKnowledgeEntries(db, createdBy, count) {
   if (count === 0) return;
+  const organization = db.prepare(`
+    SELECT org_id AS organizationId
+    FROM organization_memberships
+    WHERE user_id=? AND status='active'
+    ORDER BY org_id
+    LIMIT 1
+  `).get(createdBy);
+  assert.ok(organization, 'capacity fixture owner must have an active organization');
   const replacementGuard = db.prepare(`
     SELECT sql FROM sqlite_schema
     WHERE type='trigger' AND name='knowledge_entries_no_replace_insert'
@@ -377,17 +385,17 @@ function bulkFillUserKnowledgeEntries(db, createdBy, count) {
         UNION ALL SELECT value + 1 FROM fixture_rows WHERE value < @count
       )
       INSERT INTO knowledge_entries (
-        entry_type,source_type,source_id,key_terms,content,created_by,is_public,
+        entry_type,source_type,source_id,key_terms,content,created_by,org_id,is_public,
         title,summary,tags_json,visibility,source_hash,business_type,business_id,
         metadata_json,embedding_json,source_identity_sha256,content_sha256
       )
       SELECT
-        'note','task7_capacity_fixture',NULL,'[]','',@createdBy,0,
+        'note','task7_capacity_fixture',NULL,'[]','',@createdBy,@organizationId,0,
         '','','[]','private',NULL,NULL,NULL,'{}',NULL,
         lower(printf('e%063x', 2000000 + value)),
         'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
       FROM fixture_rows
-    `).run({ count, createdBy });
+    `).run({ count, createdBy, organizationId: organization.organizationId });
   } finally {
     db.exec(replacementGuard.sql);
   }

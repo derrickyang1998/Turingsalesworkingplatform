@@ -217,6 +217,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/031_organization_billing_statements.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 32,
+      name: '032_demand_proposal_tenant_ownership',
+      sourcePath: 'migrations/032_demand_proposal_tenant_ownership.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

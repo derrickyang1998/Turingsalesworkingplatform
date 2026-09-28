@@ -49,7 +49,7 @@ test('schema, sanitizer, and trusted source registries retain plan entitlement m
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(trusted.migrationContract.targetVersion, 31);
+  assert.equal(trusted.migrationContract.targetVersion, 32);
   assert.ok(trusted.migrationContract.acceptedSourceVersions.includes(27));
 
   for (const requiredPath of [
@@ -83,7 +83,7 @@ test('deployment inventory retains the exact v27 implementation and focused rele
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 32\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,

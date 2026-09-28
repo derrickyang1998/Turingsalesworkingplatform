@@ -1,5 +1,12 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.36-demand-proposal-tenant-ownership (Verification ready, 2026-09-28) - 需求与方案组织边界
+
+- 新增迁移 `032_demand_proposal_tenant_ownership`，为需求和方案补齐组织归属、历史回填、索引及写入校验；无法唯一判断归属的历史数据会让迁移失败，不静默跨组织归类。
+- 旧版 `/api/demands`、`/api/proposals` 兼容路径保留；新 API 写入绑定当前认证组织，普通用户集合查询按组织过滤，管理员继续具备全平台审计可见性。
+- Campaign 目标访问、需求/方案创建和可信生产源码清单已同步到迁移 v32；双轮迁移门禁 `20/20`、本地发布预检通过。
+- 生产部署尚未执行；本轮未读取、修改、轮换或使用 `derrick` 凭据。
+
 ## v0.9.35-admin-operations-health-state (Production deployed, 2026-09-28) - 运营健康状态投影
 
 - 管理控制室的 Provider、飞书、导入和工作流健康摘要现在返回明确的 `healthy`、`pending`、`attention` 和 `no_data` 状态；安全审计事件单独标记为 `recorded`，避免把“有审计记录”误报成故障。

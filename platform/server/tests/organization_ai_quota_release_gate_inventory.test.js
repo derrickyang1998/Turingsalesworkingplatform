@@ -69,7 +69,7 @@ test('schema, sanitizer, and trusted source registries retain organization quota
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(trusted.migrationContract.targetVersion, 31);
+  assert.equal(trusted.migrationContract.targetVersion, 32);
   assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 31);
   for (const requiredPath of [
     'server/migrations/029_organization_monthly_ai_quota.js',
@@ -104,7 +104,7 @@ test('deployment inventory retains schema v29 and the focused organization quota
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 32\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,

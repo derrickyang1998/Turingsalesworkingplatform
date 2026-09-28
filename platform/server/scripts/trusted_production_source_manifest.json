@@ -51,7 +51,7 @@
       30,
       31
     ],
-    "targetVersion": 31,
+    "targetVersion": 32,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -183,6 +183,10 @@
       "sha256": "adc74e0cb00b898e94304acce4462577caf449ae0567961ca38ea77a09948c87"
     },
     {
+      "path": "server/migrations/032_demand_proposal_tenant_ownership.js",
+      "sha256": "5eda14dd01797a0917d44f514a70b222bc17ff1e70228355fc1b646b7164f7d5"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -204,7 +208,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "1ab6bb405072bd87d77746066439a1212482d1448f1945b2a909d4cd94c277f5"
+      "sha256": "4632da9750458902dc9e3bd0aecf1e289d0f57ffc7c7fe88effc463e1101ce47"
     },
     {
       "path": "server/package-lock.json",
@@ -316,7 +320,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "dcd802c5bf90a2a6cbf8f773bb569534a1e69fcae6ba50b5e2a97174b0174a2e"
+      "sha256": "6963bb9d05df9d993ef2f760081bf906976cc9e77b5c9320dd5bc6adf5c29013"
     },
     {
       "path": "server/routes.js",
@@ -380,7 +384,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "470230e4be79c6297bd8620ebdca0073c7401bdb7ba8179ac016fa24001db1ec"
+      "sha256": "2720b63ad9d131726de3229627fba6736c30fdda0853fe8abb6ad38cb8a546ea"
     },
     {
       "path": "server/workflow_engine.js",
@@ -416,7 +420,7 @@
     },
     {
       "path": "server/services/campaign_access_service.js",
-      "sha256": "135bd8b73aca7c15189429a3c92f26b234359ad0aaf1b33191524c71961cb849"
+      "sha256": "1dd41a0671251469064baa18e56ca77eabc8d0c8c7848996052ae66db12b80f2"
     },
     {
       "path": "server/services/campaign_collaboration_service.js",
@@ -424,7 +428,7 @@
     },
     {
       "path": "server/services/campaign_link_service.js",
-      "sha256": "60ad01ae5f0fff398694c2e2608fda7ee98988cce7209ef2a6edf9744c02f885"
+      "sha256": "e5e759e54f41749f5448aae3c3efa4e190705038078b9147f8832255ae4b07b9"
     },
     {
       "path": "server/services/campaign_ppt_service.js",

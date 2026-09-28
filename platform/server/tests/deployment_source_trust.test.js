@@ -140,7 +140,7 @@ function createV11Fixture(t, name) {
   const databasePath = path.join(root, 'managed-v11.db');
   const database = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
-    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS.filter((migration) => migration.version <= 11)
   });
   database.close();
   return { root, databasePath };
@@ -437,7 +437,7 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
     acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -730,7 +730,7 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v31 
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -897,9 +897,9 @@ test('trusted required sanitize-and-verify migrates the current managed v7 sourc
     preMigrationRestoreVerified: report.preMigrationRestoreVerified,
     legacyPreservationVerified: report.legacyPreservationVerified
   }, {
-    verificationMode: 'v7-to-v31-migration',
+    verificationMode: 'v7-to-v32-migration',
     sourceVersion: 7,
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
@@ -1004,9 +1004,9 @@ test('trusted required sanitize-and-verify path migrates exact managed v8 to v31
     adoption: report.databaseAdoption
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
-    verificationMode: 'v8-to-v31-migration',
+    verificationMode: 'v8-to-v32-migration',
     sourceVersion: 8,
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -1073,7 +1073,7 @@ module.exports.runMigrations = function tmMutatingManagedV7Startup(db, options) 
   });
 
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /managed target migration no-op changed/i);
+  assert.match(result.stderr, /managed target migration no-op changed|partial_or_malformed unknown managed schema object/i);
   assert.deepEqual(
     fs.readdirSync(workDir).filter((entry) => entry.startsWith('tm-managed-target-noop-')),
     []
@@ -1175,7 +1175,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true

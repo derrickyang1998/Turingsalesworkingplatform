@@ -87,10 +87,10 @@ function openV24Fixture(t) {
   return db;
 }
 
-test('schema gate registries retain migration 024 and terminate at current migration 031', () => {
+test('schema gate registries retain migration 024 and terminate at current migration 032', () => {
   assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((entry) => entry.version === 24), migration024);
   assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((entry) => entry.version === 24), migration024);
-  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 31);
+  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 32);
   assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 31);
 });
 
@@ -101,7 +101,7 @@ test('trusted source gate current contract retains the exact migration 024 sourc
 
   assert.deepEqual(loaded.migrationContract, {
     acceptedSourceVersions: [...supportedSourceVersions],
-    targetVersion: 31,
+    targetVersion: 32,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -155,7 +155,7 @@ test('committed current trusted manifest still pins migration 024 source bytes e
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const loaded = trustedGate.loadTrustedManifest(manifestPath);
 
-  assert.equal(loaded.migrationContract.targetVersion, 31);
+  assert.equal(loaded.migrationContract.targetVersion, 32);
   assert.equal(loaded.migrationContract.acceptedSourceVersions.at(-1), 31);
   const migrationEntry = loaded.files.find(
     (entry) => entry.path === 'server/migrations/024_knowledge_tenant_ownership.js'
@@ -174,7 +174,7 @@ test('committed current trusted manifest still pins migration 024 source bytes e
   }
 });
 
-test('deploy inventory carries migration 024 while gating candidate and no-op paths at current v31', () => {
+test('deploy inventory carries migration 024 while gating candidate and no-op paths at current v32', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const files = powerShellArrayEntries(deploy, 'FILES');
 
@@ -183,7 +183,7 @@ test('deploy inventory carries migration 024 while gating candidate and no-op pa
   assert.ok(files.has('server/tests/knowledge_tenant_release_gate_inventory.test.js'));
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 32\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,

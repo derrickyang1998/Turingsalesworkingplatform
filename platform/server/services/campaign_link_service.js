@@ -28,6 +28,14 @@ const MAX_LINKED_JSON_ARRAY_ITEMS = 10_000;
 const MAX_LINKED_JSON_OBJECT_KEYS = 1_000;
 const MAX_LINKED_KNOWLEDGE_INPUT_BYTES = 393_216;
 const MAX_RETAINED_RESPONSE_BYTES = 900_000;
+
+function hasTableColumn(db, tableName, columnName) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info(?)
+    WHERE name=?
+  `).get(tableName, columnName));
+}
 const RESERVED_KNOWLEDGE_SOURCE_TYPES = new Set([
   'campaign_demand',
   'campaign_proposal',
@@ -1263,22 +1271,40 @@ function createCampaignLinkService(db) {
       const dataJson = body.data_json === undefined
         ? null
         : JSON.stringify(body.data_json);
-      const result = db.prepare(`
-        INSERT INTO demands (
-          user_id,brand_name,company_name,product_name,industry,budget,
-          target_market,platform,data_json
-        ) VALUES (?,?,?,?,?,?,?,?,?)
-      `).run(
-        userId,
-        body.brand_name,
-        body.company_name,
-        body.product_name,
-        body.industry,
-        body.budget,
-        body.target_market,
-        body.platform,
-        dataJson
-      );
+      const result = hasTableColumn(db, 'demands', 'org_id')
+        ? db.prepare(`
+          INSERT INTO demands (
+            user_id,org_id,brand_name,company_name,product_name,industry,budget,
+            target_market,platform,data_json
+          ) VALUES (?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          userId,
+          access.campaign.org_id,
+          body.brand_name,
+          body.company_name,
+          body.product_name,
+          body.industry,
+          body.budget,
+          body.target_market,
+          body.platform,
+          dataJson
+        )
+        : db.prepare(`
+          INSERT INTO demands (
+            user_id,brand_name,company_name,product_name,industry,budget,
+            target_market,platform,data_json
+          ) VALUES (?,?,?,?,?,?,?,?,?)
+        `).run(
+          userId,
+          body.brand_name,
+          body.company_name,
+          body.product_name,
+          body.industry,
+          body.budget,
+          body.target_market,
+          body.platform,
+          dataJson
+        );
       const demandId = Number(result.lastInsertRowid);
       db.prepare(`
         INSERT INTO activity_log (user_id,action,module,details,ip_address)
@@ -1359,10 +1385,15 @@ function createCampaignLinkService(db) {
       authorize
     }, ({ access, auditFingerprint, campaignId, userId }) => {
       assertCampaignWritable(access);
-      const result = db.prepare(`
-        INSERT INTO proposals (user_id,demand_id,template_id,content)
-        VALUES (?,?,?,?)
-      `).run(userId, body.demand_id, body.template_id, body.content);
+      const result = hasTableColumn(db, 'proposals', 'org_id')
+        ? db.prepare(`
+          INSERT INTO proposals (user_id,org_id,demand_id,template_id,content)
+          VALUES (?,?,?,?,?)
+        `).run(userId, access.campaign.org_id, body.demand_id, body.template_id, body.content)
+        : db.prepare(`
+          INSERT INTO proposals (user_id,demand_id,template_id,content)
+          VALUES (?,?,?,?)
+        `).run(userId, body.demand_id, body.template_id, body.content);
       const proposalId = Number(result.lastInsertRowid);
       db.prepare(`
         INSERT INTO activity_log (user_id,action,module,details,ip_address)

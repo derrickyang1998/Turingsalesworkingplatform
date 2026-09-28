@@ -1886,8 +1886,8 @@ function createLegacyDemand(req, res) {
   const { brand_name, company_name, product_name, industry, budget, target_market, platform, data_json } = req.body;
   try {
     const demandId = db.transaction(function() {
-      const result = db.prepare('INSERT INTO demands (user_id, brand_name, company_name, product_name, industry, budget, target_market, platform, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        req.user.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
+      const result = db.prepare('INSERT INTO demands (user_id, org_id, brand_name, company_name, product_name, industry, budget, target_market, platform, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        req.user.id, req.authContext.organization.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
       );
       db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_demand', 'demand', `Created demand for ${brand_name}`, req.ip);
       knowledgeService.ingestBusinessArtifact(db, {
@@ -1931,6 +1931,7 @@ app.post('/api/demands', authMiddleware, (req, res) => {
 app.get('/api/demands', authMiddleware, (req, res) => {
   const demands = readDemandProposalCollection(db, {
     userId: req.user.id,
+    organizationId: req.authContext.organization.id,
     recordType: 'demand',
     search: req.query.search
   });
@@ -1942,7 +1943,7 @@ function createLegacyProposal(req, res) {
   const { demand_id, template_id, content } = req.body;
   try {
     const proposalId = db.transaction(function() {
-      const result = db.prepare('INSERT INTO proposals (user_id, demand_id, template_id, content) VALUES (?, ?, ?, ?)').run(req.user.id, demand_id, template_id, content);
+      const result = db.prepare('INSERT INTO proposals (user_id, org_id, demand_id, template_id, content) VALUES (?, ?, ?, ?, ?)').run(req.user.id, req.authContext.organization.id, demand_id, template_id, content);
       db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'generate_proposal', 'proposal', `Generated proposal with template ${template_id}`, req.ip);
       knowledgeService.ingestBusinessArtifact(db, {
         artifactType: 'confirmed_proposal',
@@ -1986,6 +1987,7 @@ app.post('/api/proposals', authMiddleware, (req, res) => {
 app.get('/api/proposals', authMiddleware, (req, res) => {
   const proposals = readDemandProposalCollection(db, {
     userId: req.user.id,
+    organizationId: req.authContext.organization.id,
     recordType: 'proposal',
     search: req.query.search
   });

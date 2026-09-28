@@ -376,7 +376,7 @@
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
         <h2 class="release-title">v0.9.35 · 运营健康状态投影</h2>
-        <p class="release-copy">在管理控制室的 Provider、飞书、导入和工作流摘要中增加明确状态判断。已完成 GitHub 同步、受控生产发布和远端验收；公网健康、parser、PM2、浏览器烟测与凭据保护门禁均通过。</p>
+        <p class="release-copy">当前生产基线保持 v0.9.35；下一候选 v0.9.36 已完成需求/方案组织边界实现和本地迁移门禁，待 GitHub 同步、受控发布与远端验收。</p>
         <div class="chips">
           <span class="chip good">2026-09-24 证据已核对</span>
           <span class="chip">Schema v31</span>
@@ -392,9 +392,9 @@
       <aside class="panel focus" aria-label="当前开发焦点">
         <h2>下一开发焦点 / Next</h2>
         <div class="focus-list">
-          <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段收口</b><p class="hint">Phase 8 closeout and evidence reconciliation</p></div></div>
+          <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段租户边界</b><p class="hint">Demand and proposal organization ownership before remote acceptance</p></div></div>
           <div class="focus-row"><span class="index">2</span><div><b>独立最终审查</b><p class="hint">Independent final review and release gate</p></div></div>
-        <div class="focus-row"><span class="index">3</span><div><b>受控生产发布</b><p class="hint">Dedicated smoke identity, backup, and remote evidence</p></div></div>
+          <div class="focus-row"><span class="index">3</span><div><b>v0.9.36 受控发布</b><p class="hint">Migration v32, dedicated smoke identity, backup, and remote evidence</p></div></div>
         </div>
       </aside>
     </section>
@@ -426,6 +426,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.36 · 2026-09-28</code><div><b>需求与方案组织边界</b><p class="hint">Migration v32; two-run gate 20/20; local deploy preflight passed; production acceptance pending</p></div><span class="badge active">READY</span></div>
         <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28; remote acceptance passed</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.34 · 2026-09-24</code><div><b>管理控制室组织级健康投影</b><p class="hint">Tenant-level Provider, Feishu, import, workflow projection; included in current production source</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.33 · 2026-09-24</code><div><b>AI 审计夹具兼容性修复</b><p class="hint">Current quota/concurrency read projections; focused matrix 43/43; production pending</p></div><span class="badge active">VERIFIED</span></div>

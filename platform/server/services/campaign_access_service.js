@@ -869,13 +869,13 @@ function targetRow(db, recordType, recordId) {
   switch (recordType) {
     case 'demand':
       return db.prepare(`
-        SELECT id,user_id
+        SELECT id,user_id${hasTableColumn(db, 'demands', 'org_id') ? ',org_id' : ''}
         FROM demands
         WHERE id=?
       `).get(recordId);
     case 'proposal':
       return db.prepare(`
-        SELECT id,user_id,demand_id
+        SELECT id,user_id,demand_id${hasTableColumn(db, 'proposals', 'org_id') ? ',org_id' : ''}
         FROM proposals
         WHERE id=?
       `).get(recordId);
@@ -963,11 +963,17 @@ function targetPermissions(db, {
   );
   switch (recordType) {
     case 'demand':
-    case 'proposal':
+    case 'proposal': {
+      const sameOrganization = (
+        !Object.hasOwn(target, 'org_id') ||
+        target.org_id === null ||
+        target.org_id === campaignAccess.campaign.org_id
+      );
       return {
-        visible: platformAdmin || actorOwns,
-        manageable: platformAdmin || actorOwns
+        visible: sameOrganization && (platformAdmin || actorOwns),
+        manageable: sameOrganization && (platformAdmin || actorOwns)
       };
+    }
     case 'influencer':
       const sameOrganization = target.org_id === campaignAccess.campaign.org_id;
       return {
@@ -1232,7 +1238,7 @@ function normalizeDemandProposalSearch(value) {
 function readDemandProposalCollection(db, options) {
   const input = snapshotPlainOptions(
     options,
-    ['userId', 'recordType', 'search'],
+    ['userId', 'organizationId', 'recordType', 'search'],
     false
   );
   if (input === null) throw new TypeError('collection options are required');
@@ -1240,6 +1246,9 @@ function readDemandProposalCollection(db, options) {
   if (userId === null) {
     throw new TypeError('userId must be a positive canonical safe integer');
   }
+  const organizationId = input.organizationId === undefined || input.organizationId === null
+    ? null
+    : canonicalId(input.organizationId, 'organizationId');
   const collection = closedMapValue(
     DEMAND_PROPOSAL_COLLECTIONS,
     input.recordType
@@ -1252,7 +1261,12 @@ function readDemandProposalCollection(db, options) {
   if (!actor || actor.is_active !== 1) return [];
 
   const platformAdmin = actor.role === 'admin';
-  const legacyPredicate = platformAdmin ? '1=1' : 'record.user_id=?';
+  const hasOrganizationColumn = hasTableColumn(db, collection.table, 'org_id');
+  const legacyPredicate = platformAdmin
+    ? '1=1'
+    : hasOrganizationColumn && organizationId !== null
+      ? 'record.user_id=? AND record.org_id=?'
+      : 'record.user_id=?';
   const campaignAccessPredicate = boundPredicate();
   const searchPredicate = search === null
     ? ''
@@ -1264,7 +1278,10 @@ function readDemandProposalCollection(db, options) {
     : '';
   const projection = platformAdmin ? collection.adminProjection : '';
   const params = [input.recordType];
-  if (!platformAdmin) params.push(userId);
+  if (!platformAdmin) {
+    params.push(userId);
+    if (hasOrganizationColumn && organizationId !== null) params.push(organizationId);
+  }
   params.push(userId, DEFAULT_ORGANIZATION_CODE);
   if (search !== null) {
     params.push(...collection.searchColumns.map(() => search));

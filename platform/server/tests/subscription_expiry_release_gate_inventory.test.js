@@ -42,16 +42,16 @@ function powerShellShaAssignment(source, variableName) {
   return match[1];
 }
 
-test('schema, sanitizer, and trusted source registries retain subscription expiry migration 028 through current migration 031', () => {
+test('schema, sanitizer, and trusted source registries retain subscription expiry migration 028 through current migration 032', () => {
   assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((entry) => entry.version === 28), migration028);
   assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((entry) => entry.version === 28), migration028);
-  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 31);
+  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 32);
   assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 31);
   assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 31);
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(trusted.migrationContract.targetVersion, 31);
+  assert.equal(trusted.migrationContract.targetVersion, 32);
   assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 31);
 
   for (const requiredPath of [
@@ -78,7 +78,7 @@ test('current trusted candidate files are LF-normalized byte-for-byte', () => {
   }
 });
 
-test('deployment inventory retains the exact v28 implementation while targeting current v31', () => {
+test('deployment inventory retains the exact v28 implementation while targeting current v32', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const phase4Integration = fs.readFileSync(
     path.join(serverRoot, 'tests', 'phase4_server_integration.test.js'),
@@ -102,7 +102,7 @@ test('deployment inventory retains the exact v28 implementation while targeting 
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 32\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,

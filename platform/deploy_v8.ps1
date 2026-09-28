@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8b
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "6a2d5dc2175f7d3b0ee4ed0b4352b5d07c532777d29f6b88e3c8c1dd3fe83050"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "d5c97d660820e3fc27a3526ea6c9420fcb88780352c8582dfc4d98d646078e19"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "d5d995c337a03f847291bcee55d8e3c90ce14e3b299e1d6bfe99a8bd85ba11f0"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "8847b7a25fd745b8097c4efa37f524cda329abc48e7ff324e0e903be4cb2882a"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "dcd802c5bf90a2a6cbf8f773bb569534a1e69fcae6ba50b5e2a97174b0174a2e"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "6963bb9d05df9d993ef2f760081bf906976cc9e77b5c9320dd5bc6adf5c29013"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -131,6 +131,7 @@ $FILES = @(
     "server\migrations\029_organization_monthly_ai_quota.js",
     "server\migrations\030_ai_provider_concurrency_reservation.js",
     "server\migrations\031_organization_billing_statements.js",
+    "server\migrations\032_demand_proposal_tenant_ownership.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -11011,7 +11012,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 31) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 32) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
