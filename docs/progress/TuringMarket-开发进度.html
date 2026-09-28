@@ -375,16 +375,17 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.37 · Phase 8 来源档案连续性</h2>
-        <p class="release-copy">当前生产基线已更新为 v0.9.37；schema v32 精确来源档案与 no-op adoption 门禁已接入，候选验证、公网健康和生产凭据保护验收通过。</p>
+        <h2 class="release-title">v0.9.38 · Phase 7B 性能数据飞书幂等投递</h2>
+        <p class="release-copy">当前生产基线已上线性能数据飞书投递切片：批准映射、当前状态更新、每日快照、持久回执、待核对与显式重试均已接入最新性能看板。</p>
         <div class="chips">
-          <span class="chip good">2026-09-24 证据已核对</span>
+          <span class="chip good">2026-09-28 线上已验收</span>
           <span class="chip">Schema v32</span>
-          <span class="chip">Candidate matrix 148 / 148</span>
-          <span class="chip">Organization health projection</span>
-          <span class="chip">Admin operations 28 / 28</span>
-          <span class="chip">AI audit 15 / 15</span>
-          <span class="chip">Read-only health projection</span>
+          <span class="chip">Focused tests 89 / 89</span>
+          <span class="chip">Trusted gates 97 / 97</span>
+          <span class="chip">Browser smoke 3 / 3</span>
+          <span class="chip">Performance routes online</span>
+          <span class="chip">Protected credentials 39</span>
+          <span class="chip">Phase 7B bounded slice</span>
           <span class="chip good">Production online</span>
         </div>
       </div>
@@ -392,18 +393,18 @@
       <aside class="panel focus" aria-label="当前开发焦点">
         <h2>下一开发焦点 / Next</h2>
         <div class="focus-list">
-          <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段证据收口</b><p class="hint">Unified admin coverage, remaining tenant boundaries, recovery and performance evidence</p></div></div>
-          <div class="focus-row"><span class="index">2</span><div><b>v0.9.37 受控发布</b><p class="hint">Exact schema-v32 source profile, no-op adoption, backup, and remote evidence</p></div></div>
+          <div class="focus-row"><span class="index">1</span><div><b>Phase 7B 自动化闭环</b><p class="hint">Provider scheduling, local-day dedupe, inbound allowlist, and nightly reconciliation</p></div></div>
+          <div class="focus-row"><span class="index">2</span><div><b>第 8 阶段证据收口</b><p class="hint">Unified admin coverage, remaining tenant boundaries, recovery and performance evidence</p></div></div>
           <div class="focus-row"><span class="index">3</span><div><b>Phase 9 候选评审</b><p class="hint">Per-feature product approval before implementation</p></div></div>
         </div>
       </aside>
     </section>
 
     <section class="metrics" aria-label="发布数据">
-      <div class="metric"><span class="meta">候选回归</span><strong>148 / 148</strong><span class="hint">Production-shaped candidate matrix</span></div>
-      <div class="metric"><span class="meta">独立终审</span><strong>APPROVE</strong><span class="hint">No open P0-P2</span></div>
-      <div class="metric"><span class="meta">迁移精确性</span><strong>v32</strong><span class="hint">Exact source profile and replay gates</span></div>
-      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Concurrency denial and exact restore</span></div>
+      <div class="metric"><span class="meta">聚焦回归</span><strong>89 / 89</strong><span class="hint">Performance, Feishu, outbox, route and UI contracts</span></div>
+      <div class="metric"><span class="meta">受信门禁</span><strong>97 / 97</strong><span class="hint">Trusted source and deployment contracts</span></div>
+      <div class="metric"><span class="meta">独立审查</span><strong>APPROVE + NOTES</strong><span class="hint">No blocking correctness or security findings</span></div>
+      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Release-smoke performance Feishu route smoke</span></div>
     </section>
 
     <section class="panel" aria-labelledby="roadmap-title">
@@ -415,7 +416,7 @@
         <div class="phase"><span class="phase-code">Phase 1-3</span><div><div class="phase-name">安全、基线与产品壳层</div><div class="hint">Security, regression guardrails, UX shell</div></div><span class="badge live">生产基线</span></div>
         <div class="phase"><span class="phase-code">Phase 4-5</span><div><div class="phase-name">组织主链与 CRM 工作台</div><div class="hint">Organization spine and CRM workspace</div></div><span class="badge live">生产基线</span></div>
         <div class="phase"><span class="phase-code">Phase 6</span><div><div class="phase-name">AI、知识库、方案与 PPT</div><div class="hint">Core loop live; continuing bounded upgrades</div></div><span class="badge live">已上线</span></div>
-        <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Execution and performance intelligence slices</div></div><span class="badge live">已上线</span></div>
+        <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Manual performance intelligence and Feishu delivery slice live; automation remains queued</div></div><span class="badge active">切片上线</span></div>
         <div class="phase"><span class="phase-code">Phase 8</span><div><div class="phase-name">管理、权益与多租户治理</div><div class="hint">Current: plans, expiry, quota, durable concurrency</div></div><span class="badge active">进行中</span></div>
         <div class="phase"><span class="phase-code">Phase 9-10</span><div><div class="phase-name">销售增长候选与 V1 收口</div><div class="hint">Per-feature approval, then production hardening</div></div><span class="badge queued">待排期</span></div>
       </div>
@@ -426,6 +427,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.38 · 2026-09-28</code><div><b>性能数据飞书幂等投递切片</b><p class="hint">Approved mapping, current-state upsert, daily snapshot append, durable receipts, reconciliation and release-smoke route acceptance; focused 89/89 and trusted 97/97</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.37 · 2026-09-28</code><div><b>Phase 8 来源档案连续性</b><p class="hint">Exact schema-v32 source profile and no-op adoption; candidate matrix 148/148; browser, public health, and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.36 · 2026-09-28</code><div><b>需求与方案组织边界</b><p class="hint">Migration v32; replay and browser gates passed; public health and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28; remote acceptance passed</p></div><span class="badge live">ONLINE</span></div>

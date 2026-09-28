@@ -1,11 +1,13 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.38-performance-feishu-delivery-slice (Verification ready, production deployment pending, 2026-09-28) - 性能数据飞书幂等投递切片
+## v0.9.38-performance-feishu-delivery-slice (Production deployed, 2026-09-28) - 性能数据飞书幂等投递切片
 
 - 将已批准的性能字段映射接入现有 Feishu Bitable outbox：当前状态按视频链接更新/补写，每日快照追加到独立目标表；所有外部写入仍由服务端开关控制，未启用时保留 CSV 降级流程。
 - 新增性能投递回执、UUID 幂等、已批准配置版本绑定、外部结果不确定时的待核对状态、显式重试和管理员回执确认；前端显示最近投递记录并阻止活动切换后的旧请求污染当前界面。
 - 新增 `GET /api/campaigns/:id/performance/feishu-deliveries`、`POST /api/campaigns/:id/performance/feishu-sync` 和显式重试 API；保留原有连接配置、预览和 CSV 导出行为。
-- 聚焦性能/飞书/前端合同测试 `89/89` 通过；受信部署源合同与门禁 `97/97` 通过；JavaScript、PowerShell 语法和 `git diff --check` 通过。独立审查无阻断项，生产部署与远端验收待本轮完成。
+- 聚焦性能/飞书/前端合同测试 `89/89` 通过；受信部署源合同与门禁 `97/97` 通过；JavaScript、PowerShell 语法和 `git diff --check` 通过。独立审查 `APPROVE_WITH_NOTES`，无阻断项。
+- 已完成 guarded production deploy：run `f44c2b7a51d448c69ed433c590bd7b2e`，candidate SHA-256 `b25d972d6114601ad29d8b1df8dabc4f8a20c4c80f945004fd10cb64b922ce12`，备份 `v060-crm-sales-workspace-20260928-210547`，备份清单 SHA-256 `68e8a339dde921c1f442e89f5d6144f6ba80b9225c33f501e32a23321e0a3d61`。
+- 线上 `/api/health` 为 200 且 parser ready；PM2 online、Nginx 配置通过、浏览器 smoke `3/3`、`PROTECTED_CREDENTIALS_UNCHANGED 39` 通过。专用 `release-smoke` 已验证性能飞书连接/回执路由、未配置降级和幂等键失败关闭；未使用、修改或轮换 `derrick`。
 - 本切片不宣称 Phase 7B 全部完成：Provider 定时采集、按项目本地日去重、小时级回流白名单、02:00 对账、死信和连续性能观察仍保留在后续切片。
 
 ## v0.9.37-phase8-source-profile-continuity (Production deployed, 2026-09-28) - Phase 8 来源档案连续性
