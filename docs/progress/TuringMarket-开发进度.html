@@ -367,16 +367,16 @@
           <p class="subtitle">Development delivery control board</p>
         </div>
       </div>
-      <div class="status-line"><span class="status-dot" aria-hidden="true"></span>生产基线在线 · 新版本待发布 / Baseline online · candidate pending</div>
+      <div class="status-line"><span class="status-dot" aria-hidden="true"></span>生产已上线 / Production online</div>
     </div>
   </header>
 
   <main>
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
-        <p class="eyebrow">Current candidate · 当前发布候选</p>
-        <h2 class="release-title">v0.9.35 · 运营健康状态投影（待发布）</h2>
-        <p class="release-copy">在管理控制室的 Provider、飞书、导入和工作流摘要中增加明确状态判断，并修正本进度板的发布口径。生产基线 v0.9.26 仍在线；v0.9.34/v0.9.35 当前均为本地验证完成，线上主机与 GitHub 同步条件仍待恢复。</p>
+        <p class="eyebrow">Current production release · 当前生产版本</p>
+        <h2 class="release-title">v0.9.35 · 运营健康状态投影</h2>
+        <p class="release-copy">在管理控制室的 Provider、飞书、导入和工作流摘要中增加明确状态判断。已完成 GitHub 同步、受控生产发布和远端验收；公网健康、parser、PM2、浏览器烟测与凭据保护门禁均通过。</p>
         <div class="chips">
           <span class="chip good">2026-09-24 证据已核对</span>
           <span class="chip">Schema v31</span>
@@ -385,7 +385,7 @@
           <span class="chip">Admin operations 28 / 28</span>
           <span class="chip">AI audit 15 / 15</span>
           <span class="chip">Read-only health projection</span>
-          <span class="chip">Production pending</span>
+          <span class="chip good">Production online</span>
         </div>
       </div>
 
@@ -426,8 +426,8 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
-        <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28</p></div><span class="badge active">LOCAL VERIFIED</span></div>
-        <div class="release"><code>v0.9.34 · 2026-09-24</code><div><b>管理控制室组织级健康投影</b><p class="hint">Tenant-level Provider, Feishu, import, workflow projection; focused and trusted gates 60/60</p></div><span class="badge active">LOCAL VERIFIED</span></div>
+        <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28; remote acceptance passed</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.34 · 2026-09-24</code><div><b>管理控制室组织级健康投影</b><p class="hint">Tenant-level Provider, Feishu, import, workflow projection; included in current production source</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.33 · 2026-09-24</code><div><b>AI 审计夹具兼容性修复</b><p class="hint">Current quota/concurrency read projections; focused matrix 43/43; production pending</p></div><span class="badge active">VERIFIED</span></div>
         <div class="release"><code>v0.9.32 · 2026-09-24</code><div><b>管理控制室运营健康投影</b><p class="hint">Provider, Feishu, import, workflow, security projection; 28/28 tests</p></div><span class="badge active">READY</span></div>
         <div class="release"><code>v0.9.31 · 2026-09-24</code><div><b>Phase 8 收口测试契约对账</b><p class="hint">Migration 024 9/9, campaign access 35/35, verification-only</p></div><span class="badge active">AUDITED</span></div>
