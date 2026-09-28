@@ -144,6 +144,11 @@ const {
 const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const { createPerformanceFeishuProjectionService } = require('./services/performance_feishu_projection_service');
+const { createPerformanceFeishuDeliveryService } = require('./services/performance_feishu_delivery_service');
+const {
+  createPerformanceFeishuSchedulerService,
+  startPerformanceFeishuScheduler
+} = require('./services/performance_feishu_scheduler_service');
 const { createFeishuClient } = require('./feishu_client');
 const { createFeishuBitableOutboxService } = require('./services/feishu_bitable_outbox_service');
 const { createPerformanceCollectionRunService } = require('./services/performance_collection_run_service');
@@ -345,6 +350,22 @@ const performanceFeishuConnectionService = createPerformanceFeishuConnectionServ
 const performanceFeishuProjectionService = createPerformanceFeishuProjectionService({
   performanceService: performanceManualService,
   feishuConnectionService: performanceFeishuConnectionService
+});
+const performanceFeishuDeliveryService = createPerformanceFeishuDeliveryService({
+  projectionService: performanceFeishuProjectionService,
+  connectionService: performanceFeishuConnectionService,
+  feishuClient: performanceFeishuClient,
+  outboxService: performanceFeishuBitableOutboxService
+});
+const performanceFeishuSchedulerEnabled = process.env.PERFORMANCE_FEISHU_SCHEDULER_ENABLED !== 'false';
+const performanceFeishuSchedulerIntervalMs = Number(process.env.PERFORMANCE_FEISHU_SCHEDULER_INTERVAL_MS);
+const performanceFeishuSchedulerService = createPerformanceFeishuSchedulerService(db, {
+  connectionService: performanceFeishuConnectionService,
+  freshnessService: performanceFreshnessService,
+  deliveryService: performanceFeishuDeliveryService,
+  feishuClient: performanceFeishuClient,
+  enabled: performanceFeishuSchedulerEnabled,
+  intervalMs: performanceFeishuSchedulerIntervalMs
 });
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
@@ -2357,6 +2378,8 @@ registerPerformanceRoutes(app, {
   feishuProjectionService: performanceFeishuProjectionService,
   feishuClient: performanceFeishuClient,
   feishuBitableOutboxService: performanceFeishuBitableOutboxService,
+  feishuDeliveryService: performanceFeishuDeliveryService,
+  feishuSchedulerService: performanceFeishuSchedulerService,
   aiReviewService: performanceAiReviewService,
   contentAnalysisService: performanceContentAnalysisService,
   organizationMethodologyService,
@@ -3438,6 +3461,13 @@ function stopPerformanceProviderScheduler() {
   performanceProviderScheduler = null;
 }
 
+let performanceFeishuScheduler = null;
+function stopPerformanceFeishuScheduler() {
+  if (!performanceFeishuScheduler) return;
+  performanceFeishuScheduler.stop();
+  performanceFeishuScheduler = null;
+}
+
 let httpServer = null;
 let shutdownStarted = false;
 function shutdownServer(signal) {
@@ -3446,6 +3476,7 @@ function shutdownServer(signal) {
   stopCampaignPptJanitor();
   stopCustomerReportPptJanitor();
   stopPerformanceProviderScheduler();
+  stopPerformanceFeishuScheduler();
   if (!httpServer) {
     process.exit(1);
     return;
@@ -3570,6 +3601,18 @@ async function bootstrapServer() {
     );
   }
 
+  if (performanceFeishuSchedulerEnabled) {
+    performanceFeishuScheduler = startPerformanceFeishuScheduler(
+      performanceFeishuSchedulerService,
+      {
+        intervalMs: performanceFeishuSchedulerIntervalMs,
+        onError(error) {
+          console.error('Performance Feishu scheduler tick failed', error);
+        }
+      }
+    );
+  }
+
   const workflowEngine = require('./workflow_engine');
   workflowEngine.initEngine();
   const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
@@ -3582,6 +3625,7 @@ async function bootstrapServer() {
     stopCampaignPptJanitor();
     stopCustomerReportPptJanitor();
     stopPerformanceProviderScheduler();
+    stopPerformanceFeishuScheduler();
   });
   process.once('SIGTERM', () => shutdownServer('SIGTERM'));
   process.once('SIGINT', () => shutdownServer('SIGINT'));
@@ -3591,6 +3635,7 @@ bootstrapServer().catch((error) => {
   stopCampaignPptJanitor();
   stopCustomerReportPptJanitor();
   stopPerformanceProviderScheduler();
+  stopPerformanceFeishuScheduler();
   console.error('Server startup failed', error);
   process.exitCode = 1;
 });

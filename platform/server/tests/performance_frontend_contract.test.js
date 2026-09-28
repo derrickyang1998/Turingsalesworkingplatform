@@ -9,6 +9,7 @@ const platformRoot = path.resolve(__dirname, '..', '..');
 const indexHtml = fs.readFileSync(path.join(platformRoot, 'index.html'), 'utf8');
 const appSource = fs.readFileSync(path.join(platformRoot, 'app.js'), 'utf8');
 const serverSource = fs.readFileSync(path.join(platformRoot, 'server', 'server.js'), 'utf8');
+const performanceRouteSource = fs.readFileSync(path.join(platformRoot, 'server', 'routes_performance.js'), 'utf8');
 const performanceServiceSource = fs.readFileSync(path.join(platformRoot, 'server', 'services', 'performance_manual_service.js'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(platformRoot, 'client', 'core', 'navigation.js'), 'utf8');
 const componentStyles = fs.readFileSync(path.join(platformRoot, 'client', 'styles', 'components.css'), 'utf8');
@@ -230,8 +231,17 @@ test('performance monitor exposes a permission-aware Feishu connection configura
   assert.match(componentStyles, /\.tm-performance-feishu-connection-form/);
   assert.match(componentStyles, /\.tm-performance-feishu-connection-mapping/);
   assert.match(componentStyles, /\.tm-performance-feishu-delivery-panel/);
+  assert.match(componentStyles, /\.tm-performance-feishu-scheduler-status/);
+  assert.match(appSource, /var performanceFeishuSchedulerStatus = null;/);
+  assert.match(appSource, /data\.scheduler/);
+  assert.match(appSource, /服务端自动投递/);
+  assert.match(appSource, /通过 outbox 保证幂等/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE/);
   assert.match(serverSource, /performanceFeishuBitableOutboxService/);
+  assert.match(serverSource, /createPerformanceFeishuSchedulerService/);
+  assert.match(serverSource, /startPerformanceFeishuScheduler/);
+  assert.match(serverSource, /feishuSchedulerService/);
+  assert.match(performanceRouteSource, /payload\.scheduler/);
 });
 
 test('an approved Feishu mapping can export the current observed snapshot from the existing connection panel', () => {

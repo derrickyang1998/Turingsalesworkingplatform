@@ -26,6 +26,9 @@ const {
   createPerformanceFeishuDeliveryService
 } = require('./services/performance_feishu_delivery_service');
 const {
+  PerformanceFeishuSchedulerServiceError
+} = require('./services/performance_feishu_scheduler_service');
+const {
   PerformanceFeishuContractError
 } = require('./services/performance_feishu_contract');
 const {
@@ -77,6 +80,7 @@ function sendError(request, response, error) {
     error instanceof PerformanceFeishuConnectionServiceError ||
     error instanceof PerformanceFeishuProjectionServiceError ||
     error instanceof PerformanceFeishuDeliveryServiceError ||
+    error instanceof PerformanceFeishuSchedulerServiceError ||
     error instanceof PerformanceFeishuContractError ||
     error instanceof FeishuClientError ||
     error instanceof FeishuBitableOutboxError ||
@@ -292,6 +296,10 @@ function registerPerformanceRoutes(app, options = {}) {
   })();
   if (!feishuDeliveryService || typeof feishuDeliveryService.sync !== 'function' || typeof feishuDeliveryService.retry !== 'function') {
     throw new TypeError('A performance Feishu delivery service is required.');
+  }
+  const feishuSchedulerService = options.feishuSchedulerService || null;
+  if (feishuSchedulerService && typeof feishuSchedulerService.campaignStatus !== 'function') {
+    throw new TypeError('A performance Feishu scheduler service is invalid.');
   }
   const feishuDeliveryListService = options.feishuBitableOutboxService || null;
   const aiReviewService = options.aiReviewService || createPerformanceAiReviewService(options.db, {
@@ -579,14 +587,20 @@ function registerPerformanceRoutes(app, options = {}) {
           'Performance Feishu delivery history is unavailable.'
         );
       }
-      return response.json({
+      const payload = {
         deliveries: feishuDeliveryListService.listPerformance({
           userId: authenticatedUserId(request),
           campaignId: request.params.id,
           limit: request.query && request.query.limit
-        }),
-        request_id: requestId(request)
-      });
+        })
+      };
+      if (feishuSchedulerService) {
+        payload.scheduler = feishuSchedulerService.campaignStatus({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id
+        });
+      }
+      return response.json(Object.assign(payload, { request_id: requestId(request) }));
     } catch (error) {
       return sendError(request, response, error);
     }

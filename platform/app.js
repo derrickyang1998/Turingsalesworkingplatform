@@ -12279,6 +12279,7 @@ var performanceFeishuConnection = null;
 var performanceFeishuConnectionRequestSequence = 0;
 var performanceFeishuConnectionSaveInFlight = false;
 var performanceFeishuDeliveryHistory = [];
+var performanceFeishuSchedulerStatus = null;
 var performanceFeishuDeliveryHistoryRequestSequence = 0;
 var performanceFeishuDeliveryActionInFlight = false;
 var performanceFeishuDeliveryActionSequence = 0;
@@ -12465,6 +12466,7 @@ function changePerformanceCampaignContext(value) {
   performanceFeishuDeliveryHistoryRequestSequence += 1;
   performanceFeishuDeliveryActionSequence += 1;
   performanceFeishuDeliveryHistory = [];
+  performanceFeishuSchedulerStatus = null;
   performanceFeishuDeliveryActionInFlight = false;
   performanceProviderRefreshInFlight = false;
   performanceProviderRefreshRetry = { campaignId: null, idempotencyKey: '' };
@@ -13057,6 +13059,39 @@ function renderPerformanceFeishuDeliveryPanel(connection, deliveries, errorMessa
   var canApprove = capabilities.can_approve === true;
   var hasApprovedMapping = active && active.status === 'approved';
   var canSync = canApprove && hasApprovedMapping && external.enabled === true && !performanceFeishuDeliveryActionInFlight;
+  var scheduler = performanceFeishuSchedulerStatus || null;
+  var schedulerLabels = {
+    disabled: '自动投递已关闭',
+    not_configured: '等待飞书写入配置',
+    mapping_required: '等待批准字段映射',
+    waiting_for_observation: '等待首条效果观测',
+    ready: '自动投递已就绪',
+    unknown: '自动投递状态未知'
+  };
+  var schedulerStatus = scheduler && scheduler.status || 'unknown';
+  var schedulerDetail = scheduler
+    ? (scheduler.reason === 'external_sync_not_configured'
+      ? '服务端不会发起外部写入。'
+      : scheduler.reason === 'approved_mapping_required'
+        ? '需要先批准当前活动的飞书字段映射。'
+        : scheduler.reason === 'performance_observation_required'
+          ? '录入或采集效果数据后，服务端才会创建投递回执。'
+          : '服务端按配置周期检查待更新数据，并通过 outbox 保证幂等。')
+    : '加载活动后显示服务端调度状态。';
+  var schedulerMeta = [];
+  if (scheduler && scheduler.interval_seconds) schedulerMeta.push('检查周期 ' + Number(scheduler.interval_seconds) + ' 秒');
+  if (scheduler && scheduler.time_zone) schedulerMeta.push('时区 ' + String(scheduler.time_zone));
+  if (scheduler && scheduler.campaign && scheduler.campaign.latest_observation_at) {
+    schedulerMeta.push('最近观测 ' + String(scheduler.campaign.latest_observation_at));
+  }
+  if (scheduler && scheduler.last_tick_at) schedulerMeta.push('上次检查 ' + String(scheduler.last_tick_at));
+  var schedulerHtml = '<div class="tm-performance-feishu-scheduler-status">'
+    + '<div class="tm-performance-feishu-scheduler-heading"><strong>服务端自动投递</strong>'
+    + '<span class="tm-performance-feishu-scheduler-state tm-performance-feishu-scheduler-state-' + esc(String(schedulerStatus)) + '">'
+    + esc(schedulerLabels[schedulerStatus] || schedulerLabels.unknown) + '</span></div>'
+    + '<p>' + esc(schedulerDetail) + '</p>'
+    + (schedulerMeta.length ? '<div class="tm-performance-feishu-scheduler-meta">' + esc(schedulerMeta.join(' · ')) + '</div>' : '')
+    + '</div>';
   var actions = '';
   if (!canApprove) {
     actions = '<p class="tm-performance-integration-note">当前账号只能查看同步回执；写入和回执处理由组织管理员执行。</p>';
@@ -13095,6 +13130,7 @@ function renderPerformanceFeishuDeliveryPanel(connection, deliveries, errorMessa
   }).join('') : '<div class="tm-state-empty">当前活动还没有性能数据飞书投递记录。</div>';
   panel.innerHTML = '<div class="tm-performance-feishu-delivery-panel">'
     + '<div class="tm-performance-feishu-delivery-intro"><p>每次提交都会生成独立幂等回执；出现待核对状态时，先在飞书确认是否已写入，再确认回执或显式重试。</p></div>'
+    + schedulerHtml
     + actions
     + '<div class="tm-performance-feishu-delivery-history"><h4>最近性能投递</h4>' + historyHtml + '</div>'
     + '</div>';
@@ -13106,6 +13142,7 @@ async function loadPerformanceFeishuDeliveries() {
   var sequence = ++performanceFeishuDeliveryHistoryRequestSequence;
   if (campaignId === null) {
     performanceFeishuDeliveryHistory = [];
+    performanceFeishuSchedulerStatus = null;
     renderPerformanceFeishuDeliveryPanel(null, [], null);
     return [];
   }
@@ -13115,10 +13152,12 @@ async function loadPerformanceFeishuDeliveries() {
     if (!performanceFeishuDeliveryHistoryIsCurrent(sequence, campaignId)) return [];
     if (!response.ok) throw new Error(data.error || '飞书投递记录加载失败');
     performanceFeishuDeliveryHistory = Array.isArray(data.deliveries) ? data.deliveries : [];
+    performanceFeishuSchedulerStatus = data.scheduler || null;
     renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, performanceFeishuDeliveryHistory, null);
     return performanceFeishuDeliveryHistory;
   } catch (error) {
     if (!performanceFeishuDeliveryHistoryIsCurrent(sequence, campaignId)) return [];
+    performanceFeishuSchedulerStatus = null;
     renderPerformanceFeishuDeliveryPanel(performanceFeishuConnection, [], error.message || '飞书投递记录加载失败');
     return [];
   }
@@ -13372,6 +13411,7 @@ async function savePerformanceFeishuConnectionDraft() {
     if (!response.ok) throw new Error(data.error || '连接草稿保存失败');
     if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return;
     renderPerformanceFeishuConnection(data);
+    loadPerformanceFeishuDeliveries();
     toast('飞书连接草稿已保存，尚未启用外部同步。');
   } catch (error) {
     if (requestSequence === performanceFeishuConnectionRequestSequence && campaignId === getPerformanceCampaignId()) {
@@ -13402,6 +13442,7 @@ async function approvePerformanceFeishuConnectionDraft() {
     if (!response.ok) throw new Error(data.error || '连接草稿批准失败');
     if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return;
     renderPerformanceFeishuConnection(data);
+    loadPerformanceFeishuDeliveries();
     toast('飞书连接映射已批准，外部同步仍未启用。');
   } catch (error) {
     if (requestSequence === performanceFeishuConnectionRequestSequence && campaignId === getPerformanceCampaignId()) {

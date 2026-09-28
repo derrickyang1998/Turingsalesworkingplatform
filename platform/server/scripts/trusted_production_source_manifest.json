@@ -377,7 +377,7 @@
     },
     {
       "path": "server/routes_performance.js",
-      "sha256": "2ecf5f0a7633e3a67caabf798533544a77c98d12cd5324b230fdb6427b3721c3"
+      "sha256": "b8953a85d10f4cd5fdfe3557be338dc6cc9068b8ea5af841b19fb12913a977a9"
     },
     {
       "path": "server/routes_workflow.js",
@@ -385,7 +385,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "0f63ed70e7c121c27898b54dccaa18a8205809b800ae457c2cfe17786a71ca0d"
+      "sha256": "b0ce0e68a1ed79b28f5ead84a64d4e947aea7b679ac9e1f17ca2f4663a2ac095"
     },
     {
       "path": "server/workflow_engine.js",
@@ -662,6 +662,10 @@
     {
       "path": "server/services/performance_feishu_delivery_service.js",
       "sha256": "f8f4dbc565f52ac317d5567f721fbd712d15c8dd399728f821edefb886114d0d"
+    },
+    {
+      "path": "server/services/performance_feishu_scheduler_service.js",
+      "sha256": "d1a20236e5b2dd1c34118f2ea2c4f86d14c8edfe662bedad9464ed2cdf4b4898"
     }
   ]
 }
