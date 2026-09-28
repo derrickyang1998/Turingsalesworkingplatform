@@ -1,5 +1,12 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.35-admin-operations-health-state (Verification ready, 2026-09-28) - 运营健康状态投影
+
+- 管理控制室的 Provider、飞书、导入和工作流健康摘要现在返回明确的 `healthy`、`pending`、`attention` 和 `no_data` 状态；安全审计事件单独标记为 `recorded`，避免把“有审计记录”误报成故障。
+- 前端健康卡片展示状态和最近时间，保留原有管理员门禁、查询、分页、组织级投影和审计行为。
+- 定向管理员运营、路由和 UI 测试 `28/28` 通过；`node --check`、`git diff --check` 和本地发布预检通过。本轮本地代码审查未发现阻断项；独立发布审查仍待线上发布条件恢复。
+- 本轮未执行生产部署、凭据操作或 `derrick` 烟测；GitHub 网络与受控生产主机授权仍待恢复。
+
 ## v0.9.34-admin-operations-organization-health (Verification ready, 2026-09-24) - 管理控制室组织级健康投影
 
 - 管理员运营控制室在既有全局健康摘要下增加按组织的 Provider、飞书 outbox、导入批次/行和工作流实例/任务只读投影，帮助定位具体租户运营状态。

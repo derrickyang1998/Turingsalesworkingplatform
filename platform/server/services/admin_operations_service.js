@@ -116,6 +116,21 @@ function latestTimestamp(db, tableName, column) {
   return row && row.value ? row.value : null;
 }
 
+function healthState(statusCounts, options = {}) {
+  const counts = statusCounts && typeof statusCounts === 'object' ? statusCounts : {};
+  const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const attentionStatuses = new Set(options.attentionStatuses || ['failed', 'error', 'blocked', 'cancelled']);
+  const pendingStatuses = new Set(options.pendingStatuses || ['pending', 'queued', 'running', 'active', 'retrying']);
+  if (Object.keys(counts).some((status) => attentionStatuses.has(String(status).toLowerCase()) && Number(counts[status]) > 0)) return 'attention';
+  if (Object.keys(counts).some((status) => pendingStatuses.has(String(status).toLowerCase()) && Number(counts[status]) > 0)) return 'pending';
+  return total > 0 ? 'healthy' : 'no_data';
+}
+
+function countState(count, latestAt) {
+  if ((Number(count) || 0) <= 0) return 'no_data';
+  return latestAt ? 'healthy' : 'pending';
+}
+
 function countByOrganization(db, tableName) {
   if (!columnExists(db, tableName, 'org_id')) return {};
   return db.prepare(`
@@ -206,23 +221,27 @@ function operationalHealth(db) {
   return {
     provider: {
       status_counts: providerRuns,
+      state: healthState(providerRuns),
       latest_at: latestTimestamp(db, 'performance_provider_collection_runs', 'completed_at')
     },
     feishu: {
       status_counts: feishuOutbox,
+      state: healthState(feishuOutbox),
       latest_at: latestTimestamp(db, 'feishu_bitable_outbox', 'updated_at')
     },
     imports: {
       rows: Number(influencerRows.rows) || 0,
       batches: Number(influencerRows.batches) || 0,
+      state: countState(influencerRows.batches, influencerRows.latest_at),
       latest_at: influencerRows.latest_at || null
     },
     workflow: {
       instance_status_counts: workflowInstances,
       task_status_counts: workflowTasks,
+      state: healthState(workflowInstances),
       latest_at: latestTimestamp(db, 'workflow_instances', 'created_at')
     },
-    security: { event_count: Number(securityEvents) || 0 },
+    security: { event_count: Number(securityEvents) || 0, state: securityEvents > 0 ? 'recorded' : 'no_data' },
     organizations: organizationHealth(db)
   };
 }
@@ -313,6 +332,7 @@ module.exports = {
   AdminOperationsServiceError,
   createAdminOperationsService,
   categorySql,
+  healthState,
   operationalHealth,
   organizationHealth
 };

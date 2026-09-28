@@ -51,10 +51,15 @@ test('admin operations returns classified searchable events and auditable summar
   assert.equal(result.events[0].category, 'provider');
   assert.equal(result.summary.provider, 1);
   assert.deepEqual(result.health.provider.status_counts, { failed: 1 });
+  assert.equal(result.health.provider.state, 'attention');
   assert.deepEqual(result.health.feishu.status_counts, { pending: 1 });
+  assert.equal(result.health.feishu.state, 'pending');
   assert.equal(result.health.imports.batches, 1);
+  assert.equal(result.health.imports.state, 'healthy');
   assert.deepEqual(result.health.workflow.instance_status_counts, { active: 1 });
+  assert.equal(result.health.workflow.state, 'pending');
   assert.equal(result.health.security.event_count, 1);
+  assert.equal(result.health.security.state, 'recorded');
   assert.deepEqual(result.health.organizations, [{
     organization_id: 1,
     code: 'org-one',

@@ -10104,13 +10104,14 @@ function renderAdminOperations(data) {
       }, 0);
     }
     healthEl.innerHTML = [
-      ['Provider运行', statusTotal(provider.status_counts), provider.latest_at || '暂无记录'],
-      ['飞书队列', statusTotal(feishu.status_counts), feishu.latest_at || '暂无记录'],
-      ['导入批次', Number(imports.batches) || 0, imports.latest_at || '暂无记录'],
-      ['工作流实例', statusTotal(workflow.instance_status_counts), workflow.latest_at || '暂无记录'],
-      ['安全事件', Number(security.event_count) || 0, '审计日志累计']
+      ['Provider运行', statusTotal(provider.status_counts), provider.latest_at || '暂无记录', provider.state],
+      ['飞书队列', statusTotal(feishu.status_counts), feishu.latest_at || '暂无记录', feishu.state],
+      ['导入批次', Number(imports.batches) || 0, imports.latest_at || '暂无记录', imports.state],
+      ['工作流实例', statusTotal(workflow.instance_status_counts), workflow.latest_at || '暂无记录', workflow.state],
+      ['安全事件', Number(security.event_count) || 0, '审计日志累计', security.state]
     ].map(function(item) {
-      return '<div class="stat"><div class="stat-value">' + esc(String(item[1])) + '</div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-help">' + esc(String(item[2])) + '</div></div>';
+      var stateLabels = { healthy: '正常', pending: '处理中', attention: '需关注', no_data: '暂无数据', recorded: '已记录' };
+      return '<div class="stat"><div class="stat-value">' + esc(String(item[1])) + '</div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-help">' + esc(stateLabels[item[3]] || '状态未知') + ' · ' + esc(String(item[2])) + '</div></div>';
     }).join('');
   }
   var organizationHealthEl = document.getElementById('ad_operationsOrganizationHealth');
