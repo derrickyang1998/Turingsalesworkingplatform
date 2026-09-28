@@ -375,12 +375,12 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.36 · 需求与方案组织边界</h2>
-        <p class="release-copy">当前生产基线已更新为 v0.9.36；需求与方案已完成组织归属闭环，迁移 v32、浏览器烟测、公网健康和生产凭据保护验收通过。</p>
+        <h2 class="release-title">v0.9.37 · Phase 8 来源档案连续性</h2>
+        <p class="release-copy">当前生产基线已更新为 v0.9.37；schema v32 精确来源档案与 no-op adoption 门禁已接入，候选验证、公网健康和生产凭据保护验收通过。</p>
         <div class="chips">
           <span class="chip good">2026-09-24 证据已核对</span>
-          <span class="chip">Schema v31</span>
-          <span class="chip">Focused matrix 60 / 60</span>
+          <span class="chip">Schema v32</span>
+          <span class="chip">Candidate matrix 148 / 148</span>
           <span class="chip">Organization health projection</span>
           <span class="chip">Admin operations 28 / 28</span>
           <span class="chip">AI audit 15 / 15</span>
@@ -392,17 +392,17 @@
       <aside class="panel focus" aria-label="当前开发焦点">
         <h2>下一开发焦点 / Next</h2>
         <div class="focus-list">
-          <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段租户边界</b><p class="hint">Demand and proposal organization ownership before remote acceptance</p></div></div>
-          <div class="focus-row"><span class="index">2</span><div><b>独立最终审查</b><p class="hint">Independent final review and release gate</p></div></div>
-          <div class="focus-row"><span class="index">3</span><div><b>v0.9.36 受控发布</b><p class="hint">Migration v32, dedicated smoke identity, backup, and remote evidence</p></div></div>
+          <div class="focus-row"><span class="index">1</span><div><b>第 8 阶段证据收口</b><p class="hint">Unified admin coverage, remaining tenant boundaries, recovery and performance evidence</p></div></div>
+          <div class="focus-row"><span class="index">2</span><div><b>v0.9.37 受控发布</b><p class="hint">Exact schema-v32 source profile, no-op adoption, backup, and remote evidence</p></div></div>
+          <div class="focus-row"><span class="index">3</span><div><b>Phase 9 候选评审</b><p class="hint">Per-feature product approval before implementation</p></div></div>
         </div>
       </aside>
     </section>
 
     <section class="metrics" aria-label="发布数据">
-      <div class="metric"><span class="meta">定向回归</span><strong>103 / 103</strong><span class="hint">Affected tests only</span></div>
+      <div class="metric"><span class="meta">候选回归</span><strong>148 / 148</strong><span class="hint">Production-shaped candidate matrix</span></div>
       <div class="metric"><span class="meta">独立终审</span><strong>APPROVE</strong><span class="hint">No open P0-P2</span></div>
-      <div class="metric"><span class="meta">迁移精确性</span><strong>23 / 23</strong><span class="hint">Schema and replay gates</span></div>
+      <div class="metric"><span class="meta">迁移精确性</span><strong>v32</strong><span class="hint">Exact source profile and replay gates</span></div>
       <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Concurrency denial and exact restore</span></div>
     </section>
 
@@ -426,6 +426,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.37 · 2026-09-28</code><div><b>Phase 8 来源档案连续性</b><p class="hint">Exact schema-v32 source profile and no-op adoption; candidate matrix 148/148; browser, public health, and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.36 · 2026-09-28</code><div><b>需求与方案组织边界</b><p class="hint">Migration v32; replay and browser gates passed; public health and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28; remote acceptance passed</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.34 · 2026-09-24</code><div><b>管理控制室组织级健康投影</b><p class="hint">Tenant-level Provider, Feishu, import, workflow projection; included in current production source</p></div><span class="badge live">ONLINE</span></div>

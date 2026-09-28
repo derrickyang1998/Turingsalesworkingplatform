@@ -1,5 +1,11 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.37-phase8-source-profile-continuity (Production deployed, 2026-09-28) - Phase 8 来源档案连续性
+
+- 补齐 schema v32 的生产清洗器精确 profile、结构策略、受信来源清单和迁移门禁支持。
+- 修正 v32 no-op adoption 白名单，避免已迁移生产数据库被错误视为旧版本；历史 v24-v31 契约继续保留。
+- 已完成 guarded production deploy：run `0ac9c0dc9ea6471cb43458701e108fcd`，candidate SHA-256 `a7c8b720f2f452773ae629bef29c9e3d4a8f7551b3e2fe1c8d5ff45aec427ae4`，备份 `v060-crm-sales-workspace-20260928-193312`。
+
 ## v0.9.36-demand-proposal-tenant-ownership (Production deployed, 2026-09-28) - 需求与方案组织边界
 
 - 新增迁移 `032_demand_proposal_tenant_ownership`，为需求和方案补齐组织归属、历史回填、索引及写入校验；无法唯一判断归属的历史数据会让迁移失败，不静默跨组织归类。
