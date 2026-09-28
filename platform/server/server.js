@@ -282,13 +282,19 @@ const campaignPptService = createCampaignPptService(db, {
 const performanceManualService = createPerformanceManualService(db);
 const performanceProviderSchedulerEnabled = Boolean(process.env.YOUTUBE_DATA_API_KEY) &&
   process.env.PERFORMANCE_PROVIDER_SCHEDULER_ENABLED !== 'false';
+const performanceProviderSchedulerIntervalMs = process.env.PERFORMANCE_PROVIDER_SCHEDULER_INTERVAL_MS
+  ? Number(process.env.PERFORMANCE_PROVIDER_SCHEDULER_INTERVAL_MS)
+  : undefined;
+const performanceProviderSchedulerTimeZone = process.env.PERFORMANCE_PROVIDER_TIME_ZONE || 'Asia/Shanghai';
 const youtubeDataApiClient = createYouTubeDataApiClient({
   apiKey: process.env.YOUTUBE_DATA_API_KEY || ''
 });
 const performanceProviderCollectionService = createPerformanceProviderCollectionService(db, {
   providerClient: youtubeDataApiClient,
   performanceService: performanceManualService,
-  schedulerEnabled: performanceProviderSchedulerEnabled
+  schedulerEnabled: performanceProviderSchedulerEnabled,
+  schedulerIntervalMs: performanceProviderSchedulerIntervalMs,
+  timeZone: performanceProviderSchedulerTimeZone
 });
 const performanceFreshnessService = createPerformanceFreshnessService({
   performanceService: performanceManualService,
@@ -3594,6 +3600,7 @@ async function bootstrapServer() {
     performanceProviderScheduler = startPerformanceProviderScheduler(
       performanceProviderCollectionService,
       {
+        intervalMs: performanceProviderSchedulerIntervalMs,
         onError(error) {
           console.error('Performance provider scheduler tick failed', error);
         }

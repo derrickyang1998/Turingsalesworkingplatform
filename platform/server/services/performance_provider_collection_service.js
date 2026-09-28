@@ -7,8 +7,10 @@ const { assessContentFreshness } = require('./performance_freshness_service');
 const CONTRACT_VERSION = 'performance-provider-collection-v1';
 const PROVIDER = 'youtube';
 const MAX_ITEMS_PER_RUN = 50;
-const SCHEDULE_BUCKET_MS = 15 * 60 * 1000;
 const DEFAULT_SCHEDULER_INTERVAL_MS = 5 * 60 * 1000;
+const MIN_SCHEDULER_INTERVAL_MS = 60 * 1000;
+const MAX_SCHEDULER_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_TIME_ZONE = 'Asia/Shanghai';
 const CLAIM_LEASE_MS = 10 * 60 * 1000;
 const MANUAL_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 const USER_MANUAL_RUNS_PER_HOUR = 12;
@@ -63,6 +65,42 @@ function iso(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) throw new TypeError('Provider collection clock is invalid.');
   return date.toISOString();
+}
+
+function normalizeTimeZone(value) {
+  const timeZone = typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format();
+  } catch {
+    throw new TypeError('Provider collection time zone is invalid.');
+  }
+  return timeZone;
+}
+
+function localDayKey(value, timeZone) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new TypeError('Provider collection clock is invalid.');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: normalizeTimeZone(timeZone),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const fields = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value])
+  );
+  if (!/^\d{4}$/.test(fields.year) || !/^\d{2}$/.test(fields.month) || !/^\d{2}$/.test(fields.day)) {
+    throw new TypeError('Provider collection time zone is invalid.');
+  }
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+function normalizeSchedulerInterval(value) {
+  const candidate = Number(value);
+  return Number.isSafeInteger(candidate) &&
+      candidate >= MIN_SCHEDULER_INTERVAL_MS && candidate <= MAX_SCHEDULER_INTERVAL_MS
+    ? candidate
+    : DEFAULT_SCHEDULER_INTERVAL_MS;
 }
 
 function sha256(value) {
@@ -159,6 +197,8 @@ function createPerformanceProviderCollectionService(db, options = {}) {
   const getCampaignAccess = options.getCampaignAccess || defaultGetCampaignAccess;
   const now = typeof options.now === 'function' ? options.now : () => new Date();
   const schedulerEnabled = options.schedulerEnabled === true;
+  const timeZone = normalizeTimeZone(options.timeZone);
+  const schedulerIntervalMs = normalizeSchedulerInterval(options.schedulerIntervalMs);
   const globalProviderQuotaUnitsPerDay = Number.isSafeInteger(options.globalProviderQuotaUnitsPerDay) &&
       options.globalProviderQuotaUnitsPerDay > 0
     ? options.globalProviderQuotaUnitsPerDay
@@ -210,9 +250,17 @@ function createPerformanceProviderCollectionService(db, options = {}) {
       ORDER BY completed_at DESC,id DESC
       LIMIT 1
     `).get(context.orgId, context.campaignId, PROVIDER) || null;
+    const lastScheduled = db.prepare(`
+      SELECT status,scheduled_for,completed_at
+      FROM performance_provider_collection_runs
+      WHERE org_id=? AND campaign_id=? AND provider=? AND trigger_mode='scheduled'
+      ORDER BY completed_at DESC,id DESC
+      LIMIT 1
+    `).get(context.orgId, context.campaignId, PROVIDER) || null;
     return {
       latest,
-      lastSuccess
+      lastSuccess,
+      lastScheduled
     };
   }
 
@@ -230,6 +278,12 @@ function createPerformanceProviderCollectionService(db, options = {}) {
       configured,
       dispatch_available: configured && context.canDispatch,
       scheduler_enabled: configured && schedulerEnabled,
+      scheduler_interval_seconds: schedulerIntervalMs / 1000,
+      scheduler_time_zone: timeZone,
+      scheduled_local_day: localDayKey(now(), timeZone),
+      scheduled_run_guard: 'at_most_once_per_local_day',
+      last_scheduled_at: history.lastScheduled ? iso(history.lastScheduled.scheduled_for) : null,
+      last_scheduled_status: history.lastScheduled ? history.lastScheduled.status : null,
       last_success_at: history.lastSuccess ? iso(history.lastSuccess.completed_at) : null,
       next_due_at: null,
       metric_availability: metricAvailability(),
@@ -717,10 +771,14 @@ function createPerformanceProviderCollectionService(db, options = {}) {
 
   async function runScheduledDueCampaigns() {
     const providerStatus = providerClient.getStatus();
+    const clock = iso(now());
+    const scheduledLocalDay = localDayKey(clock, timeZone);
     if (!providerStatus || providerStatus.configured !== true) {
       return {
         provider: PROVIDER,
         status: 'not_configured',
+        scheduled_local_day: scheduledLocalDay,
+        scheduler_time_zone: timeZone,
         campaigns_considered: 0,
         runs_started: 0,
         runs_replayed: 0,
@@ -728,13 +786,13 @@ function createPerformanceProviderCollectionService(db, options = {}) {
         campaigns_failed: 0
       };
     }
-    const clock = new Date(now());
-    const bucket = Math.floor(clock.getTime() / SCHEDULE_BUCKET_MS) * SCHEDULE_BUCKET_MS;
-    const scheduledFor = new Date(bucket).toISOString();
+    const scheduledFor = clock;
     const campaigns = scheduledCampaigns();
     const summary = {
       provider: PROVIDER,
       status: 'completed',
+      scheduled_local_day: scheduledLocalDay,
+      scheduler_time_zone: timeZone,
       campaigns_considered: campaigns.length,
       runs_started: 0,
       runs_replayed: 0,
@@ -753,7 +811,7 @@ function createPerformanceProviderCollectionService(db, options = {}) {
           userId: actor,
           campaignId: Number(campaign.campaign_id),
           triggerMode: 'scheduled',
-          idempotencyKey: `scheduled:${scheduledFor}`,
+          idempotencyKey: `scheduled:${scheduledLocalDay}`,
           scheduledFor
         });
         if (result.replayed) summary.runs_replayed += 1;
@@ -797,9 +855,7 @@ function startPerformanceProviderScheduler(service, options = {}) {
   if (!service || typeof service.runScheduledDueCampaigns !== 'function') {
     throw new TypeError('A performance provider collection service is required.');
   }
-  const intervalMs = Number.isSafeInteger(options.intervalMs) && options.intervalMs >= 60000
-    ? options.intervalMs
-    : DEFAULT_SCHEDULER_INTERVAL_MS;
+  const intervalMs = normalizeSchedulerInterval(options.intervalMs);
   const initialDelayMs = Number.isSafeInteger(options.initialDelayMs) && options.initialDelayMs >= 0
     ? options.initialDelayMs
     : 15000;
@@ -831,5 +887,6 @@ module.exports = {
   CONTRACT_VERSION,
   PerformanceProviderCollectionServiceError,
   createPerformanceProviderCollectionService,
+  localDayKey,
   startPerformanceProviderScheduler
 };

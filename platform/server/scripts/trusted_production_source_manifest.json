@@ -385,7 +385,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "b0ce0e68a1ed79b28f5ead84a64d4e947aea7b679ac9e1f17ca2f4663a2ac095"
+      "sha256": "c59b65006558c9958fde056ad2404ef1859aeeca518ae2380d0ddc3c5792fad1"
     },
     {
       "path": "server/workflow_engine.js",
@@ -597,7 +597,7 @@
     },
     {
       "path": "server/services/performance_provider_collection_service.js",
-      "sha256": "b8f9a1be5b91cb7af2501cf4f23e9b7580167bfea80e5313bd43899bd62a2202"
+      "sha256": "4a8b5ae23752628ffc4a7e1fa35ac42283bc6428788a785a66f3b01386faefbc"
     },
     {
       "path": "server/services/ppt_artifact_store.js",

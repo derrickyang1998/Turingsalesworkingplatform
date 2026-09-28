@@ -129,7 +129,8 @@ function createFixture(options = {}) {
     providerClient,
     performanceService,
     getCampaignAccess,
-    now: () => new Date('2026-09-11T03:05:00.000Z'),
+    now: options.now || (() => new Date('2026-09-11T03:05:00.000Z')),
+    timeZone: options.timeZone || 'Asia/Shanghai',
     ...overrides
   });
   const service = createService();
@@ -197,20 +198,46 @@ test('exposes fail-closed configuration and permission-aware dispatch status', a
   assert.equal(memberStatus.dispatch_available, false);
 });
 
-test('scheduled collection processes only due YouTube campaigns once per schedule bucket', async (t) => {
-  const fixture = createFixture();
+test('scheduled collection processes due YouTube campaigns at most once per project local day', async (t) => {
+  const fixture = createFixture({
+    now: () => new Date('2026-09-28T16:30:00.000Z'),
+    timeZone: 'Asia/Shanghai'
+  });
   t.after(() => fixture.db.close());
 
   const first = await fixture.service.runScheduledDueCampaigns();
-  const replay = await fixture.service.runScheduledDueCampaigns();
+  const sameDay = await fixture.createService({
+    now: () => new Date('2026-09-29T15:59:00.000Z'),
+    timeZone: 'Asia/Shanghai'
+  }).runScheduledDueCampaigns();
+  const nextDay = await fixture.createService({
+    now: () => new Date('2026-09-29T16:01:00.000Z'),
+    timeZone: 'Asia/Shanghai'
+  }).runScheduledDueCampaigns();
 
   assert.equal(first.campaigns_considered, 1);
   assert.equal(first.runs_started, 1);
-  assert.equal(replay.runs_started, 0);
-  assert.equal(replay.runs_replayed, 1);
-  assert.equal(fixture.getProviderCalls(), 1);
-  const run = fixture.db.prepare('SELECT trigger_mode,requested_by FROM performance_provider_collection_runs').get();
+  assert.equal(first.scheduled_local_day, '2026-09-29');
+  assert.equal(sameDay.runs_started, 0);
+  assert.equal(sameDay.runs_replayed, 1);
+  assert.equal(sameDay.scheduled_local_day, '2026-09-29');
+  assert.equal(nextDay.runs_started, 1);
+  assert.equal(nextDay.runs_replayed, 0);
+  assert.equal(nextDay.scheduled_local_day, '2026-09-30');
+  assert.equal(fixture.getProviderCalls(), 2);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS count FROM performance_provider_collection_runs').get().count, 2);
+  const run = fixture.db.prepare('SELECT trigger_mode,requested_by FROM performance_provider_collection_runs ORDER BY id LIMIT 1').get();
   assert.deepEqual(run, { trigger_mode: 'scheduled', requested_by: 1 });
+
+  const status = fixture.createService({
+    now: () => new Date('2026-09-29T16:01:00.000Z'),
+    timeZone: 'Asia/Shanghai',
+    schedulerIntervalMs: 7 * 60 * 1000
+  }).getCampaignStatus({ userId: 1, campaignId: 7 });
+  assert.equal(status.scheduled_local_day, '2026-09-30');
+  assert.equal(status.scheduled_run_guard, 'at_most_once_per_local_day');
+  assert.equal(status.scheduler_time_zone, 'Asia/Shanghai');
+  assert.equal(status.scheduler_interval_seconds, 420);
 });
 
 test('persists a campaign lease before provider I/O and blocks a second process', async (t) => {
