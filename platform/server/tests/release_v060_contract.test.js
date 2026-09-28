@@ -172,7 +172,7 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and v
   assert.match(deploy, /1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821/);
   assert.match(deploy, /if \(Number\(version\) !== 32\) throw new Error\('Candidate migration target version mismatch'\)/);
   assert.doesNotMatch(deploy, /if \(Number\(version\) !== 29\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32\)/);
   assert.match(server, /const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports'/);
   assert.match(server, /reservedRootDirectories: \[CUSTOMER_REPORT_PPT_CACHE_NAMESPACE\]/);
   assert.doesNotMatch(server, /process\.env\.CUSTOMER_REPORT_PPT_(?:CACHE|TMP)_DIR/);
