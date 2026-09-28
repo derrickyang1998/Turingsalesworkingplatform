@@ -961,7 +961,7 @@ test('a verified v23 backup migrates to an identical rerunnable v24 restored cop
   }
 });
 
-test('db.js registers migration 024 for normal database startup', (t) => {
+test('db.js registers the current migration for normal database startup', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-v24-db-registration-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const databasePath = path.join(root, 'registered.db');
@@ -980,5 +980,5 @@ test('db.js registers migration 024 for normal database startup', (t) => {
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const output = result.stdout.trim().split(/\r?\n/).filter(Boolean);
-    assert.deepEqual(JSON.parse(output.at(-1)), { version: 31, hasOrgId: 1 });
+    assert.deepEqual(JSON.parse(output.at(-1)), { version: 32, hasOrgId: 1 });
 });
