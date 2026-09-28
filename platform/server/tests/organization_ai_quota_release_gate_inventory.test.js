@@ -108,7 +108,7 @@ test('deployment inventory retains schema v29 and the focused organization quota
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32\)/
   );
   assert.match(deploy, /server\/tests\/organization_ai_quota_migration\.test\.js/);
   assert.match(deploy, /server\/tests\/organization_ai_quota_release_gate_inventory\.test\.js/);
