@@ -375,15 +375,15 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.38 · Phase 7B 性能数据飞书幂等投递</h2>
-        <p class="release-copy">当前生产基线已上线性能数据飞书投递切片：批准映射、当前状态更新、每日快照、持久回执、待核对与显式重试均已接入最新性能看板。</p>
+        <h2 class="release-title">v0.9.39 · Phase 7B 性能数据飞书定时投递与状态</h2>
+        <p class="release-copy">当前生产基线已在持久投递 outbox 之上接入服务端调度与可见状态：批准映射按配置间隔检查，当前状态/本地日快照保持幂等，外部写入门控失败关闭。</p>
         <div class="chips">
           <span class="chip good">2026-09-28 线上已验收</span>
           <span class="chip">Schema v32</span>
-          <span class="chip">Focused tests 89 / 89</span>
+          <span class="chip">Focused tests 26 / 26</span>
           <span class="chip">Trusted gates 97 / 97</span>
           <span class="chip">Browser smoke 3 / 3</span>
-          <span class="chip">Performance routes online</span>
+          <span class="chip">Scheduler routes online</span>
           <span class="chip">Protected credentials 39</span>
           <span class="chip">Phase 7B bounded slice</span>
           <span class="chip good">Production online</span>
@@ -401,10 +401,10 @@
     </section>
 
     <section class="metrics" aria-label="发布数据">
-      <div class="metric"><span class="meta">聚焦回归</span><strong>89 / 89</strong><span class="hint">Performance, Feishu, outbox, route and UI contracts</span></div>
+      <div class="metric"><span class="meta">聚焦回归</span><strong>26 / 26</strong><span class="hint">Scheduler, delivery, route and UI contracts</span></div>
       <div class="metric"><span class="meta">受信门禁</span><strong>97 / 97</strong><span class="hint">Trusted source and deployment contracts</span></div>
       <div class="metric"><span class="meta">独立审查</span><strong>APPROVE + NOTES</strong><span class="hint">No blocking correctness or security findings</span></div>
-      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Release-smoke performance Feishu route smoke</span></div>
+      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Release-smoke scheduler status and fail-closed route smoke</span></div>
     </section>
 
     <section class="panel" aria-labelledby="roadmap-title">
@@ -427,7 +427,8 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
-        <div class="release"><code>v0.9.38 · 2026-09-28</code><div><b>性能数据飞书幂等投递切片</b><p class="hint">Approved mapping, current-state upsert, daily snapshot append, durable receipts, reconciliation and release-smoke route acceptance; focused 89/89 and trusted 97/97</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.39 · 2026-09-28</code><div><b>性能数据飞书定时投递与状态</b><p class="hint">Service-side scheduler, deterministic current-state/daily-snapshot operations, visible status, fail-closed external gate; focused 26/26, trusted 97/97, online smoke passed</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.38 · 2026-09-28</code><div><b>性能数据飞书幂等投递切片</b><p class="hint">Approved mapping, current-state upsert, daily snapshot append, durable receipts, reconciliation and explicit retry; focused 89/89 and trusted 97/97</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.37 · 2026-09-28</code><div><b>Phase 8 来源档案连续性</b><p class="hint">Exact schema-v32 source profile and no-op adoption; candidate matrix 148/148; browser, public health, and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.36 · 2026-09-28</code><div><b>需求与方案组织边界</b><p class="hint">Migration v32; replay and browser gates passed; public health and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.35 · 2026-09-28</code><div><b>管理控制室运营健康状态投影</b><p class="hint">Explicit healthy, pending, attention, no-data states; focused matrix 28/28; remote acceptance passed</p></div><span class="badge live">ONLINE</span></div>

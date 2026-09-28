@@ -1,5 +1,16 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.39-performance-feishu-scheduler-status (Production deployed, 2026-09-28) - 性能数据飞书定时投递与状态
+
+- 在 v0.9.38 持久投递 outbox 之上增加服务端性能飞书调度器：按配置间隔检查已批准映射，生成当前状态与本地日快照的稳定幂等操作；没有最新观测、组织管理员或外部写入配置时失败关闭，不发起外部写入。
+- `GET /api/campaigns/:id/performance/feishu-deliveries` 现在返回 `scheduler` 状态、配置门控、最近 tick、下一次 tick、映射版本和观测新鲜度；前端投递面板展示服务端自动投递状态，并在连接保存/批准后刷新，避免旧状态残留。
+- 调度服务、路由、前端、部署清单和受信来源合同已接入；无 schema 变更，生产 schema 仍为 v32，保留原有人工同步、outbox 回执、待核对、重试和 CSV 降级行为。
+- 定向性能/飞书/前端回归 `26/26`、受信部署源码合同 `65/65`、受信来源信任 `32/32`、发布合同 `38/38` 通过；JavaScript 语法、`git diff --check` 通过。独立审查 `APPROVE_WITH_NOTES`，无阻断性正确性、安全或回归问题。
+- 已完成 guarded production deploy：run `414094763f904630ad6375f08dcd8e6c`，candidate SHA-256 `132306c593360981554300df936ba63c5c49f3f759222c8272232261a2aef564`，accepted source SHA-256 `7804432c34c78acd4aaec05aa4b060afe5a4450f07e10e68b7aa6cc4d33083bd`；备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260928-220259`，`SHA256SUMS` SHA-256 `47aedd14a07cec1f229ec8096776fbd433e1069aff699ed1aa2eef7722b65e73`。
+- 线上 `/api/health` 为 200 且 parser ready；PM2 `online`、pid `1685651`、restart `0`；专用 `release-smoke` 验收返回 `ONLINE_PERFORMANCE_FEISHU_SCHEDULER_SMOKE_OK`，连接/投递状态接口为 200，调度状态 `not_configured`，外部写入门控为 `false`，缺少幂等键按 400 失败关闭，临时会话已清理。
+- GitHub HTTPS 远端分支已更新至提交 `9d72998a4b2f1c8b6ec7030a802c4f6d3a6a5ade`；本切片不读取、不修改、不轮换 `derrick` 凭据，也不使用其做发布烟测。
+- 本切片仍不宣称 Phase 7B 全部完成：Provider 定时采集、项目本地日去重不变量、小时级入站白名单、02:00 对账、死信/冲突处理、负载验证和 14 天连续观察保留在后续切片。
+
 ## v0.9.38-performance-feishu-delivery-slice (Production deployed, 2026-09-28) - 性能数据飞书幂等投递切片
 
 - 将已批准的性能字段映射接入现有 Feishu Bitable outbox：当前状态按视频链接更新/补写，每日快照追加到独立目标表；所有外部写入仍由服务端开关控制，未启用时保留 CSV 降级流程。
