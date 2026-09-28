@@ -8,7 +8,7 @@
 - 定向性能/飞书/前端回归 `26/26`、受信部署源码合同 `65/65`、受信来源信任 `32/32`、发布合同 `38/38` 通过；JavaScript 语法、`git diff --check` 通过。独立审查 `APPROVE_WITH_NOTES`，无阻断性正确性、安全或回归问题。
 - 已完成 guarded production deploy：run `414094763f904630ad6375f08dcd8e6c`，candidate SHA-256 `132306c593360981554300df936ba63c5c49f3f759222c8272232261a2aef564`，accepted source SHA-256 `7804432c34c78acd4aaec05aa4b060afe5a4450f07e10e68b7aa6cc4d33083bd`；备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260928-220259`，`SHA256SUMS` SHA-256 `47aedd14a07cec1f229ec8096776fbd433e1069aff699ed1aa2eef7722b65e73`。
 - 线上 `/api/health` 为 200 且 parser ready；PM2 `online`、pid `1685651`、restart `0`；专用 `release-smoke` 验收返回 `ONLINE_PERFORMANCE_FEISHU_SCHEDULER_SMOKE_OK`，连接/投递状态接口为 200，调度状态 `not_configured`，外部写入门控为 `false`，缺少幂等键按 400 失败关闭，临时会话已清理。
-- GitHub HTTPS 远端分支已更新至提交 `9d72998a4b2f1c8b6ec7030a802c4f6d3a6a5ade`；本切片不读取、不修改、不轮换 `derrick` 凭据，也不使用其做发布烟测。
+- GitHub HTTPS 已同步功能代码提交 `9d72998a4b2f1c8b6ec7030a802c4f6d3a6a5ade` 与文档归档提交 `eb2137fed9fa52bef32f88caea777c43eae89f25`，远端分支摘要已核对为后者；本切片不读取、不修改、不轮换 `derrick` 凭据，也不使用其做发布烟测。
 - 本切片仍不宣称 Phase 7B 全部完成：Provider 定时采集、项目本地日去重不变量、小时级入站白名单、02:00 对账、死信/冲突处理、负载验证和 14 天连续观察保留在后续切片。
 
 ## v0.9.38-performance-feishu-delivery-slice (Production deployed, 2026-09-28) - 性能数据飞书幂等投递切片
