@@ -375,15 +375,15 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.39 · Phase 7B 性能数据飞书定时投递与状态</h2>
-        <p class="release-copy">当前生产基线已在持久投递 outbox 之上接入服务端调度与可见状态：批准映射按配置间隔检查，当前状态/本地日快照保持幂等，外部写入门控失败关闭。</p>
+        <h2 class="release-title">v0.9.40 · Phase 7B Provider 项目本地日采集门禁</h2>
+        <p class="release-copy">Provider 定时采集已从 15 分钟时间桶改为每个项目本地日最多一次：同一天重复 tick 只重放既有运行，跨本地日才创建新运行；时区与间隔由服务端控制，缺少 Provider 配置继续失败关闭。</p>
         <div class="chips">
-          <span class="chip good">2026-09-28 线上已验收</span>
+          <span class="chip good">2026-09-30 线上已验收</span>
           <span class="chip">Schema v32</span>
-          <span class="chip">Focused tests 26 / 26</span>
-          <span class="chip">Trusted gates 97 / 97</span>
+          <span class="chip">Focused tests 10 / 10</span>
+          <span class="chip">Release contracts 65 / 65</span>
           <span class="chip">Browser smoke 3 / 3</span>
-          <span class="chip">Scheduler routes online</span>
+          <span class="chip">Local-day guard online</span>
           <span class="chip">Protected credentials 39</span>
           <span class="chip">Phase 7B bounded slice</span>
           <span class="chip good">Production online</span>
@@ -393,7 +393,7 @@
       <aside class="panel focus" aria-label="当前开发焦点">
         <h2>下一开发焦点 / Next</h2>
         <div class="focus-list">
-          <div class="focus-row"><span class="index">1</span><div><b>Phase 7B 自动化闭环</b><p class="hint">Provider scheduling, local-day dedupe, inbound allowlist, and nightly reconciliation</p></div></div>
+          <div class="focus-row"><span class="index">1</span><div><b>Phase 7B 回流与对账</b><p class="hint">Hourly inbound allowlist, 02:00 reconciliation, dead-letter and conflict handling</p></div></div>
           <div class="focus-row"><span class="index">2</span><div><b>第 8 阶段证据收口</b><p class="hint">Unified admin coverage, remaining tenant boundaries, recovery and performance evidence</p></div></div>
           <div class="focus-row"><span class="index">3</span><div><b>Phase 9 候选评审</b><p class="hint">Per-feature product approval before implementation</p></div></div>
         </div>
@@ -401,10 +401,10 @@
     </section>
 
     <section class="metrics" aria-label="发布数据">
-      <div class="metric"><span class="meta">聚焦回归</span><strong>26 / 26</strong><span class="hint">Scheduler, delivery, route and UI contracts</span></div>
-      <div class="metric"><span class="meta">受信门禁</span><strong>97 / 97</strong><span class="hint">Trusted source and deployment contracts</span></div>
-      <div class="metric"><span class="meta">独立审查</span><strong>APPROVE + NOTES</strong><span class="hint">No blocking correctness or security findings</span></div>
-      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Release-smoke scheduler status and fail-closed route smoke</span></div>
+      <div class="metric"><span class="meta">聚焦回归</span><strong>10 / 10</strong><span class="hint">Provider ledger, local-day replay, quota and failure boundaries</span></div>
+      <div class="metric"><span class="meta">发布合同</span><strong>65 / 65</strong><span class="hint">Trusted source, lifecycle and rollback contracts</span></div>
+      <div class="metric"><span class="meta">中断恢复</span><strong>ROLLBACK OK</strong><span class="hint">Retained lifecycle recovered before clean redeploy</span></div>
+      <div class="metric"><span class="meta">线上验收</span><strong>PASS</strong><span class="hint">Health, main routes, PM2, Nginx and credential guards</span></div>
     </section>
 
     <section class="panel" aria-labelledby="roadmap-title">
@@ -416,7 +416,7 @@
         <div class="phase"><span class="phase-code">Phase 1-3</span><div><div class="phase-name">安全、基线与产品壳层</div><div class="hint">Security, regression guardrails, UX shell</div></div><span class="badge live">生产基线</span></div>
         <div class="phase"><span class="phase-code">Phase 4-5</span><div><div class="phase-name">组织主链与 CRM 工作台</div><div class="hint">Organization spine and CRM workspace</div></div><span class="badge live">生产基线</span></div>
         <div class="phase"><span class="phase-code">Phase 6</span><div><div class="phase-name">AI、知识库、方案与 PPT</div><div class="hint">Core loop live; continuing bounded upgrades</div></div><span class="badge live">已上线</span></div>
-        <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Manual performance intelligence and Feishu delivery slice live; automation remains queued</div></div><span class="badge active">切片上线</span></div>
+        <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Provider local-day guard and Feishu delivery live; inbound reconciliation remains queued</div></div><span class="badge active">切片上线</span></div>
         <div class="phase"><span class="phase-code">Phase 8</span><div><div class="phase-name">管理、权益与多租户治理</div><div class="hint">Current: plans, expiry, quota, durable concurrency</div></div><span class="badge active">进行中</span></div>
         <div class="phase"><span class="phase-code">Phase 9-10</span><div><div class="phase-name">销售增长候选与 V1 收口</div><div class="hint">Per-feature approval, then production hardening</div></div><span class="badge queued">待排期</span></div>
       </div>
@@ -427,6 +427,7 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
+        <div class="release"><code>v0.9.40 · 2026-09-30</code><div><b>Provider 项目本地日采集门禁</b><p class="hint">At-most-once scheduled collection per campaign local day, configurable server time zone and interval; focused 10/10, release contracts 65/65, browser smoke 3/3</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.39 · 2026-09-28</code><div><b>性能数据飞书定时投递与状态</b><p class="hint">Service-side scheduler, deterministic current-state/daily-snapshot operations, visible status, fail-closed external gate; focused 26/26, trusted 97/97, online smoke passed</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.38 · 2026-09-28</code><div><b>性能数据飞书幂等投递切片</b><p class="hint">Approved mapping, current-state upsert, daily snapshot append, durable receipts, reconciliation and explicit retry; focused 89/89 and trusted 97/97</p></div><span class="badge live">ONLINE</span></div>
         <div class="release"><code>v0.9.37 · 2026-09-28</code><div><b>Phase 8 来源档案连续性</b><p class="hint">Exact schema-v32 source profile and no-op adoption; candidate matrix 148/148; browser, public health, and protected-credential acceptance verified</p></div><span class="badge live">ONLINE</span></div>
@@ -462,7 +463,7 @@
 
     <footer>
       <span>Production: http://8.163.129.160/</span>
-      <span>记录更新：2026-09-28 · 浏览器打开时间：<span id="opened-at">--</span></span>
+      <span>记录更新：2026-09-30 · 浏览器打开时间：<span id="opened-at">--</span></span>
     </footer>
   </main>
 

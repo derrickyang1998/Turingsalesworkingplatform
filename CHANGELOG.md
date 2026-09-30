@@ -1,5 +1,16 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.40-provider-local-day-collection-guard (Production deployed, 2026-09-30) - Provider 项目本地日采集门禁
+
+- Provider 定时采集从 15 分钟时间桶幂等改为“每个项目本地日最多一次”：默认使用 `Asia/Shanghai`，可由服务端 `PERFORMANCE_PROVIDER_TIME_ZONE` 配置；同一项目同一本地日重复 tick 只重放既有运行，跨本地日才创建新运行。
+- Provider 状态新增调度间隔、时区、当前本地日、每日一次门禁及最近定时运行状态；调度间隔支持服务端配置并限制在 1 分钟至 6 小时，非法值回退为 5 分钟。无 YouTube 配置时继续失败关闭，不发起外部请求。
+- 无 schema 变更，生产保持 v32；既有人工刷新冷却、组织/用户限流、共享 Provider 配额、不可变观测账本、Feishu 投递和数据看板行为保持不变。
+- 发布前定向 Provider 测试 `10/10`、发布源码合同 `65/65`、JavaScript 语法、可信 manifest/gate 摘要、`git diff --check` 与 `LOCAL_DEPLOY_PREFLIGHT_OK` 均通过；候选迁移演练、性能前端合同 `16/16` 和 Chromium 部署冒烟 `3/3` 通过。
+- 发现并处理 2026-09-28 遗留的 `release-replay-complete` 生命周期锁：确认无活动发布/写锁后，使用受信 `-RecoverInterruptedDeployment` 状态机恢复，返回 `ROLLBACK_OK`；未手工删除锁，随后从干净代次重新发布。
+- guarded production run `9d10a6575e1c49c18e94a4742842f741` 已返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 与 `PUBLIC_RELEASE_GUARD_VERIFIED`。candidate SHA-256 `ff332fdf2f452e09991730b48cb6686bfd648132c5736136539787123d7ae1ab`，accepted source SHA-256 `a17a78aacd538c83e8aaa420f9ac39b0e8482c4e4766d089d5946f4620041ffd`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260930-144648`，`SHA256SUMS` SHA-256 `e06b052d85538cc6baec7aa35b703ebf6c677ff8c55b0187d37baa62fb45a08e`；公网 `/api/health`、`/m0`、`/m0-detail`、`/m4`、`/admin` 均为 200，parser ready，PM2 online/restart 0，Nginx 配置通过。
+- 两次生产凭据门禁均为 `PROTECTED_CREDENTIALS_UNCHANGED 39`；未使用、读取、修改或轮换 `derrick` 凭据。Phase 7B 仍保留小时级入站白名单、02:00 对账、死信/冲突处理、负载验证和 14 天连续观察。
+
 ## v0.9.39-performance-feishu-scheduler-status (Production deployed, 2026-09-28) - 性能数据飞书定时投递与状态
 
 - 在 v0.9.38 持久投递 outbox 之上增加服务端性能飞书调度器：按配置间隔检查已批准映射，生成当前状态与本地日快照的稳定幂等操作；没有最新观测、组织管理员或外部写入配置时失败关闭，不发起外部写入。
